@@ -6,7 +6,11 @@
 // transcript is available. Prep-doc keywords glow orange in the subs; tapping
 // one pops its gloss + curate notes. Subtitle modes: on / keyword-only (subs
 // stay hidden unless the line carries a keyword or a ★-marked word) / off.
-// Custom controls (replay line / prev / next line, speed, furigana,
+// Word highlighting is text-color-only (no backgrounds over video) and
+// tiered — off / focus (keywords + high-value + i+1 target) / learn (+ all
+// unknown words) / all (+ every corpus-tracked word) — with a "+1" badge on
+// i+1 lines. The Aa panel holds size / height / tier prefs (global, like the
+// cc mode). Custom controls (replay line / prev / next line, speed, furigana,
 // fullscreen), resume position, wake lock while playing.
 
 import { Capacitor } from "@capacitor/core";
@@ -29,6 +33,7 @@ import type { Definitions, GlossEntry, PrepDoc, Segs, TapMark, Token } from "../
 export interface Cue {
   start: number;
   end: number;
+  cls?: string; // coverage classification (i_plus_1/…) — absent on old sidecars
   tokens?: Token[];
   text?: string;
 }
@@ -112,6 +117,100 @@ function nextSubMode(): SubMode {
   return mode;
 }
 
+// --- subtitle prefs: size · height · highlight tier -------------------------
+// Global viewing preferences like SubMode, not per-episode. Size scales the
+// overlay font; rise lifts the line off the bottom edge in 5% steps (clear of
+// hardsubs / letterbox bars).
+
+export const SUB_SIZES = [0.85, 1, 1.15, 1.3, 1.5, 1.75, 2];
+const SUB_SIZE_KEY = "fp.sub.size";
+
+export function getSubSize(): number {
+  const n = Number(localStorage.getItem(SUB_SIZE_KEY));
+  return SUB_SIZES.includes(n) ? n : 1;
+}
+
+export function stepSubSize(dir: 1 | -1): number {
+  const i = Math.max(0, Math.min(SUB_SIZES.length - 1, SUB_SIZES.indexOf(getSubSize()) + dir));
+  localStorage.setItem(SUB_SIZE_KEY, String(SUB_SIZES[i]));
+  return SUB_SIZES[i];
+}
+
+export const SUB_RISE_MAX = 8; // steps of 5% → 0–40% up the stage
+const SUB_RISE_KEY = "fp.sub.rise";
+
+export function getSubRise(): number {
+  const n = Number(localStorage.getItem(SUB_RISE_KEY));
+  return Number.isInteger(n) && n >= 0 && n <= SUB_RISE_MAX ? n : 0;
+}
+
+export function stepSubRise(dir: 1 | -1): number {
+  const n = Math.max(0, Math.min(SUB_RISE_MAX, getSubRise() + dir));
+  localStorage.setItem(SUB_RISE_KEY, String(n));
+  return n;
+}
+
+/** Highlight intensity: nothing · curated/high-value only · + all unknown
+    words · + every corpus-tracked word. Word-level text color only — no
+    backgrounds over video (see style.css .subs-overlay rules). */
+export type SubTier = "off" | "focus" | "learn" | "all";
+export const SUB_TIERS: SubTier[] = ["off", "focus", "learn", "all"];
+const SUB_TIER_KEY = "fp.sub.tier";
+
+export function getSubTier(): SubTier {
+  const raw = localStorage.getItem(SUB_TIER_KEY);
+  return (SUB_TIERS as string[]).includes(raw ?? "") ? (raw as SubTier) : "learn";
+}
+
+export function setSubTier(tier: SubTier): void {
+  localStorage.setItem(SUB_TIER_KEY, tier);
+}
+
+/** The cue's single unknown content lemma, or null (0 or ≥2 unknowns).
+    With the coverage `cls` this is the i+1/reinforcement target; without it
+    (old sidecars) it doubles as the i+1 detector. */
+export function soleUnknown(c: Cue): string | null {
+  const unk = new Set(
+    (c.tokens ?? []).filter((t) => t.c && !t.k && t.l).map((t) => t.l as string),
+  );
+  return unk.size === 1 ? unk.values().next().value! : null;
+}
+
+/** Is this cue an i+1 moment? Trust the coverage classification when the cue
+    carries one; otherwise fall back to "exactly one unknown content word"
+    (which then also counts reinforcement lines — acceptable for old sidecars). */
+export function isIplus1(c: Cue): boolean {
+  if (c.cls) return c.cls === "i_plus_1";
+  return soleUnknown(c) != null;
+}
+
+/** Word-level highlight class for a token at a tier, or null.
+    Priority: curated keyword > i+1 target (targets are usually candidates
+    too — the special i+1 emphasis must win) > reinforcement target >
+    high-value candidate > unknown > corpus-tracked. */
+export function tokenHighlight(
+  t: Token,
+  tier: SubTier,
+  keywords: Map<string, KeywordInfo>,
+  highValue: Set<string>,
+  target: string | null,
+  cls?: string,
+): string | null {
+  if (tier === "off" || !t.c || !t.l) return null;
+  if (keywords.has(t.l)) return "kw";
+  const learn = tier === "learn" || tier === "all";
+  if (t.l === target) {
+    // a true i+1 target is THE learning moment — shown at every tier but off;
+    // a reinforcement target (already on a young card) waits for learn tier
+    if (cls !== "reinforcement") return "hl-target";
+    if (learn) return "hl-lrn";
+  }
+  if (highValue.has(t.l)) return "hl-hv";
+  if (learn && !t.k) return "hl-unk";
+  if (tier === "all" && t.f != null) return "hl-corpus";
+  return null;
+}
+
 /** What the player knows about a noted word: its glossary row + the focal
     point's "why", when the curate pass flagged it. */
 export interface KeywordInfo {
@@ -154,13 +253,18 @@ function fmtClock(sec: number): string {
   return s >= 3600 ? `${Math.floor(s / 3600)}:${String(mm).padStart(2, "0")}:${ss}` : `${mm}:${ss}`;
 }
 
-/** Tokenized cues for the episode: local sidecar → server → null (SRT era). */
-async function loadTokenCues(ep: string): Promise<Cue[] | null> {
+/** Tokenized cues + ranked high-value lemmas for the episode: local sidecar →
+    server → null (SRT era). `candidates` is empty on old sidecars. */
+async function loadTokenCues(
+  ep: string,
+): Promise<{ cues: Cue[]; candidates: string[] } | null> {
   const local = await loadLocalTranscript(ep);
-  if (local?.sentences?.length) return local.sentences;
+  if (local?.sentences?.length)
+    return { cues: local.sentences, candidates: local.candidates ?? [] };
   try {
     const doc = await api.getTranscript(ep);
-    if (doc.sentences?.length) return doc.sentences;
+    if (doc.sentences?.length)
+      return { cues: doc.sentences, candidates: doc.candidates ?? [] };
   } catch {
     /* endpoint missing / unreachable — fall through to SRT */
   }
@@ -201,6 +305,13 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   pop.style.display = "none";
   stage.append(video, overlay, pop);
 
+  // high-value lemmas for the focus tier: the transcript's ranked candidates,
+  // else (old sidecar) the prep glossary — keywords win priority either way
+  let highValue = new Set<string>();
+  const fallbackHighValue = (doc: PrepDoc | null) => {
+    if (!highValue.size && doc) highValue = new Set(doc.glossary.map((g) => g.lemma));
+  };
+
   // keyword glosses/notes from the prep doc (cache-first; fetch is best-effort
   // — without it keywords just aren't special)
   let keywords = keywordIndex(getCachedPrep(episodeId));
@@ -210,6 +321,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       .then((doc) => {
         cachePrep(doc);
         keywords = keywordIndex(doc);
+        fallbackHighValue(doc);
         repaintCue();
       })
       .catch(() => {});
@@ -251,9 +363,68 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   const speedBtn = el("button", "pv", "1×") as HTMLButtonElement;
   const ccBtn = el("button", "pv", "cc") as HTMLButtonElement;
   const rubyBtn = el("button", "pv on", "あ") as HTMLButtonElement;
+  const subBtn = el("button", "pv", "Aa") as HTMLButtonElement;
   const fsBtn = el("button", "pv", "⛶") as HTMLButtonElement;
-  btnRow.append(replayBtn, prevBtn, playBtn, nextBtn, speedBtn, ccBtn, rubyBtn, fsBtn);
-  controls.append(seekRow, btnRow);
+  btnRow.append(replayBtn, prevBtn, playBtn, nextBtn, speedBtn, ccBtn, rubyBtn, subBtn, fsBtn);
+
+  // --- subtitle settings: size / height / highlight tier (Aa toggles) -----
+  const applySubPrefs = () => {
+    stage.style.setProperty("--sub-scale", String(getSubSize()));
+    stage.style.setProperty("--sub-rise", `${getSubRise() * 5}%`);
+  };
+  applySubPrefs();
+
+  const panel = el("div", "sub-panel");
+  panel.style.display = "none";
+  const prefRow = (
+    label: string,
+    dec: string,
+    inc: string,
+    step: (dir: 1 | -1) => void,
+    fmt: () => string,
+  ) => {
+    const row = el("div", "row");
+    const val = el("span", "val", fmt());
+    const btn = (txt: string, dir: 1 | -1) => {
+      const b = el("button", "", txt) as HTMLButtonElement;
+      b.addEventListener("click", () => {
+        step(dir);
+        val.textContent = fmt();
+        applySubPrefs();
+      });
+      return b;
+    };
+    row.append(el("span", "lab", label), btn(dec, -1), val, btn(inc, +1));
+    return row;
+  };
+  panel.append(
+    prefRow("size", "A−", "A+", (d) => void stepSubSize(d), () => `${getSubSize()}×`),
+    prefRow("height", "▼", "▲", (d) => void stepSubRise(d), () => `${getSubRise() * 5}%`),
+  );
+  const tierRow = el("div", "row");
+  tierRow.appendChild(el("span", "lab", "marks"));
+  const tierBtns = SUB_TIERS.map((t) => {
+    const b = el("button", "tier", t) as HTMLButtonElement;
+    b.addEventListener("click", () => {
+      setSubTier(t);
+      syncTierBtns();
+      repaintCue();
+    });
+    tierRow.appendChild(b);
+    return b;
+  });
+  const syncTierBtns = () =>
+    tierBtns.forEach((b, i) => b.classList.toggle("on", SUB_TIERS[i] === getSubTier()));
+  syncTierBtns();
+  panel.appendChild(tierRow);
+
+  subBtn.addEventListener("click", () => {
+    const open = panel.style.display === "none";
+    panel.style.display = open ? "" : "none";
+    subBtn.classList.toggle("on", open);
+  });
+
+  controls.append(seekRow, btnRow, panel);
 
   // --- footer ------------------------------------------------------------
   const footer = el("div", "btnrow");
@@ -295,9 +466,14 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     if (mode === "off") return;
     if (mode === "kw" && !cueTriggered(c, keywords, getTaps(episodeId))) return;
     if (c.tokens) {
+      const tier = getSubTier();
+      const target = soleUnknown(c);
+      if (tier !== "off" && isIplus1(c))
+        overlay.appendChild(el("span", "iplus-badge", "+1"));
       for (const t of c.tokens) {
         const n = tokenSpan(t, null);
-        if (t.l && keywords.has(t.l) && n instanceof HTMLElement) n.classList.add("kw");
+        const hl = tokenHighlight(t, tier, keywords, highValue, target, c.cls);
+        if (hl && n instanceof HTMLElement) n.classList.add(hl);
         overlay.appendChild(n);
       }
       paintTaps();
@@ -369,8 +545,14 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   void (async () => {
     try {
       const tokenized = await loadTokenCues(episodeId);
-      cues = extendCues(tokenized ?? (await loadSrtCues(episodeId)));
-      if (!tokenized) status.textContent = "plain subs (no tokenized transcript) — taps unavailable";
+      if (tokenized) {
+        cues = extendCues(tokenized.cues);
+        highValue = new Set(tokenized.candidates);
+        fallbackHighValue(getCachedPrep(episodeId));
+      } else {
+        cues = extendCues(await loadSrtCues(episodeId));
+        status.textContent = "plain subs (no tokenized transcript) — taps unavailable";
+      }
       repaintCue();
     } catch (e) {
       status.textContent = `subs unavailable: ${(e as Error).message}`;

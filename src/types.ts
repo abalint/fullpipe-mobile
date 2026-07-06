@@ -36,6 +36,7 @@ export interface Token {
   l?: string; // lemma
   c?: number | boolean; // content word (tappable)
   k?: number | boolean; // known per ledger
+  f?: number; // corpus freq rank (absent = not in the corpus / old sidecar)
 }
 
 export interface Sentence {
@@ -49,12 +50,14 @@ export interface TranscriptSentence {
   idx: number;
   start: number;
   end: number;
+  cls?: string; // coverage classification (i_plus_1/…) — absent on old sidecars
   tokens: Token[];
 }
 
 /** GET /transcript/{id} — every sentence, unlike prep's i+1 subset. */
 export interface TranscriptDoc {
   episode_id: string;
+  candidates?: string[]; // ranked high-value lemmas (absent on old sidecars)
   sentences: TranscriptSentence[];
 }
 

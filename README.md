@@ -75,7 +75,20 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   needs a one-off `tools.jmdict build` on the PC), and the mark button
   (known ✓ / interest ★) inside — marking moved into the popup.
   `cc` button cycles subtitle modes: on / kw (hidden unless the line carries
-  a keyword or ★-marked word) / off. Controls: replay-current-line, prev/next
+  a keyword or ★-marked word) / off. Word highlighting is text-color-only
+  (no backgrounds over video; known words stay plain white — absence is the
+  signal) and tiered via the `Aa` panel: **off** / **focus** (curated
+  keywords orange, ranked candidates coral-bold, the i+1 target coral +
+  underline with a small `+1` line badge) / **learn** (+ every unknown word
+  dimmed coral, reinforcement targets amber) / **all** (+ known
+  corpus-tracked words in a faint blue audit tint). A word marked ✓ goes back
+  to plain white; ★ renders violet. Tier data rides `GET /transcript`
+  (per-sentence `cls`, per-token corpus rank `f`, ranked `candidates`); old
+  cached sidecars degrade gracefully (i+1 falls back to a sole-unknown check,
+  high-value falls back to prep-glossary lemmas). The `Aa` panel also holds
+  subtitle size (0.85–2×) and height (raise the line 0–40% off the bottom
+  edge, clear of hardsubs) — global viewing prefs like the cc mode.
+  Controls: replay-current-line, prev/next
   line, speed cycle, furigana toggle, fullscreen (+landscape lock), resume
   position (cleared at watched), wake lock while playing. Prep-doc sentence
   timestamps deep-link into the player at that moment. VLC handoff survives

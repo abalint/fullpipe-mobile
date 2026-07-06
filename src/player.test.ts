@@ -7,12 +7,23 @@ import {
   cueIndexAt,
   cueTriggered,
   extendCues,
+  getSubRise,
+  getSubSize,
+  getSubTier,
+  isIplus1,
   keywordIndex,
   lastStartedAt,
   parseSrt,
   playerView,
+  setSubTier,
+  soleUnknown,
+  stepSubRise,
+  stepSubSize,
+  SUB_SIZES,
+  SUB_RISE_MAX,
+  tokenHighlight,
 } from "./views/player";
-import type { Cue } from "./views/player";
+import type { Cue, SubTier } from "./views/player";
 import { cachePrep, getTaps, saveSettings } from "./store";
 import { clearPosition, getPosition, savePosition } from "./video";
 import type { PrepDoc } from "./types";
@@ -124,6 +135,111 @@ describe("keywordIndex / cueTriggered", () => {
   });
 });
 
+describe("subtitle prefs", () => {
+  it("size steps through the ladder, clamps, persists", () => {
+    expect(getSubSize()).toBe(1);
+    expect(stepSubSize(1)).toBe(1.15);
+    expect(getSubSize()).toBe(1.15);
+    for (let i = 0; i < 20; i++) stepSubSize(1);
+    expect(getSubSize()).toBe(SUB_SIZES[SUB_SIZES.length - 1]);
+    for (let i = 0; i < 20; i++) stepSubSize(-1);
+    expect(getSubSize()).toBe(SUB_SIZES[0]);
+  });
+
+  it("rise steps up and down within bounds", () => {
+    expect(getSubRise()).toBe(0);
+    expect(stepSubRise(-1)).toBe(0); // clamped at the bottom
+    expect(stepSubRise(1)).toBe(1);
+    for (let i = 0; i < 20; i++) stepSubRise(1);
+    expect(getSubRise()).toBe(SUB_RISE_MAX);
+  });
+
+  it("tier defaults to learn, persists, rejects junk", () => {
+    expect(getSubTier()).toBe("learn");
+    setSubTier("focus");
+    expect(getSubTier()).toBe("focus");
+    localStorage.setItem("fp.sub.tier", "garbage");
+    expect(getSubTier()).toBe("learn");
+  });
+});
+
+describe("i+1 detection", () => {
+  const iplus: Cue = {
+    start: 0,
+    end: 2,
+    cls: "i_plus_1",
+    tokens: [
+      { s: "犬", l: "犬", c: true, k: true },
+      { s: "公園", l: "公園", c: true, k: false },
+    ],
+  };
+
+  it("finds the sole unknown content lemma", () => {
+    expect(soleUnknown(iplus)).toBe("公園");
+    expect(soleUnknown({ start: 0, end: 2, tokens: [{ s: "犬", l: "犬", c: true, k: true }] })).toBeNull();
+    expect(
+      soleUnknown({
+        start: 0,
+        end: 2,
+        tokens: [
+          { s: "公園", l: "公園", c: true, k: false },
+          { s: "散歩", l: "散歩", c: true, k: false },
+        ],
+      }),
+    ).toBeNull(); // two unknowns ≠ i+1
+    expect(soleUnknown({ start: 0, end: 2, text: "plain" })).toBeNull();
+  });
+
+  it("trusts cls when present, falls back to sole-unknown without it", () => {
+    expect(isIplus1(iplus)).toBe(true);
+    expect(isIplus1({ ...iplus, cls: "reinforcement" })).toBe(false);
+    expect(isIplus1({ ...iplus, cls: undefined })).toBe(true); // old sidecar
+    expect(isIplus1({ start: 0, end: 2, cls: undefined, tokens: iplus.tokens!.slice(0, 1) })).toBe(false);
+  });
+});
+
+describe("tokenHighlight", () => {
+  const kw = keywordIndex(PREP); // has 公園
+  const hv = new Set(["候補"]);
+  const t = (over: Partial<{ s: string; l: string; c: boolean; k: boolean; f: number }>) => ({
+    s: "x",
+    l: "x",
+    c: true,
+    k: false,
+    ...over,
+  });
+  const at = (tier: SubTier, tok: ReturnType<typeof t>, target: string | null = null, cls?: string) =>
+    tokenHighlight(tok, tier, kw, hv, target, cls);
+
+  it("off tier and non-content tokens get nothing", () => {
+    expect(at("off", t({ l: "公園" }))).toBeNull();
+    expect(at("all", t({ c: false }))).toBeNull();
+  });
+
+  it("focus: keywords, high-value, and the i+1 target only", () => {
+    expect(at("focus", t({ l: "公園" }))).toBe("kw");
+    expect(at("focus", t({ l: "候補" }))).toBe("hl-hv");
+    expect(at("focus", t({ l: "新語" }), "新語", "i_plus_1")).toBe("hl-target");
+    expect(at("focus", t({ l: "新語" }))).toBeNull(); // plain unknown waits for learn
+    expect(at("focus", t({ l: "復習" }), "復習", "reinforcement")).toBeNull();
+  });
+
+  it("i+1 target outranks its own candidate row so the underline shows", () => {
+    expect(at("focus", t({ l: "候補" }), "候補", "i_plus_1")).toBe("hl-target");
+  });
+
+  it("learn: + all unknowns and the reinforcement target", () => {
+    expect(at("learn", t({ l: "新語" }))).toBe("hl-unk");
+    expect(at("learn", t({ l: "復習" }), "復習", "reinforcement")).toBe("hl-lrn");
+    expect(at("learn", t({ l: "既知", k: true, f: 500 }))).toBeNull(); // known stays silent
+  });
+
+  it("all: + corpus-tracked known words", () => {
+    expect(at("all", t({ l: "既知", k: true, f: 500 }))).toBe("hl-corpus");
+    expect(at("all", t({ l: "固有", k: true }))).toBeNull(); // known, not in corpus
+  });
+});
+
 describe("resume position", () => {
   it("round-trips and clears", () => {
     expect(getPosition("yt_x")).toBeNull();
@@ -138,17 +254,25 @@ describe("playerView subtitle overlay", () => {
   const EP = "yt_playertest";
   const TRANSCRIPT = {
     episode_id: EP,
+    candidates: ["公園"],
     sentences: [
       {
         idx: 0,
         start: 0,
         end: 2,
+        cls: "comprehensible",
         tokens: [
-          { s: "犬", l: "犬", r: "いぬ", c: true, k: true },
+          { s: "犬", l: "犬", r: "いぬ", c: true, k: true, f: 40 },
           { s: "が", c: false },
         ],
       },
-      { idx: 1, start: 2, end: 4, tokens: [{ s: "公園", l: "公園", r: "こうえん", c: true, k: false }] },
+      {
+        idx: 1,
+        start: 2,
+        end: 4,
+        cls: "i_plus_1",
+        tokens: [{ s: "公園", l: "公園", r: "こうえん", c: true, k: false, f: 120 }],
+      },
     ],
   };
 
@@ -227,6 +351,79 @@ describe("playerView subtitle overlay", () => {
     const { root, video } = await mount();
     video.dispatchEvent(new Event("timeupdate"));
     expect(root.querySelector(".subs-overlay")!.textContent).toBe("");
+    root.remove();
+  });
+
+  it("badges i+1 lines and underlines the target word", async () => {
+    const { root, video } = await mount();
+    Object.defineProperty(video, "currentTime", { value: 2.5, configurable: true });
+    video.dispatchEvent(new Event("timeupdate")); // 公園 line — i+1, candidate
+    expect(root.querySelector(".subs-overlay .iplus-badge")!.textContent).toBe("+1");
+    const w = root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma='公園']")!;
+    expect(w.classList.contains("hl-target")).toBe(true); // target beats hl-hv
+    root.remove();
+  });
+
+  it("tier off strips all highlighting and the badge; known words stay silent", async () => {
+    setSubTier("off");
+    const { root, video } = await mount();
+    Object.defineProperty(video, "currentTime", { value: 2.5, configurable: true });
+    video.dispatchEvent(new Event("timeupdate"));
+    expect(root.querySelector(".subs-overlay .iplus-badge")).toBeNull();
+    const w = root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma='公園']")!;
+    expect(w.className).toBe("w unk"); // tokenSpan's classes only — no hl-*
+    root.remove();
+  });
+
+  it("tier all tints known corpus words; learn leaves them plain", async () => {
+    setSubTier("all");
+    const { root, video } = await mount();
+    video.dispatchEvent(new Event("timeupdate")); // 犬 line — known, rank 40
+    const dog = root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma='犬']")!;
+    expect(dog.classList.contains("hl-corpus")).toBe(true);
+
+    setSubTier("learn");
+    Object.defineProperty(video, "currentTime", { value: 0.5, configurable: true });
+    video.dispatchEvent(new Event("timeupdate")); // same cue index — force repaint
+    Object.defineProperty(video, "currentTime", { value: 2.5, configurable: true });
+    video.dispatchEvent(new Event("timeupdate"));
+    Object.defineProperty(video, "currentTime", { value: 0.5, configurable: true });
+    video.dispatchEvent(new Event("timeupdate"));
+    const dog2 = root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma='犬']")!;
+    expect(dog2.classList.contains("hl-corpus")).toBe(false);
+    root.remove();
+  });
+
+  it("Aa panel toggles, steps size/rise onto stage CSS vars, switches tier", async () => {
+    const { root, video } = await mount();
+    const stage = root.querySelector<HTMLElement>(".player-stage")!;
+    expect(stage.style.getPropertyValue("--sub-scale")).toBe("1");
+    expect(stage.style.getPropertyValue("--sub-rise")).toBe("0%");
+
+    const subBtn = [...root.querySelectorAll<HTMLButtonElement>("button.pv")].find(
+      (b) => b.textContent === "Aa",
+    )!;
+    const panel = root.querySelector<HTMLElement>(".sub-panel")!;
+    expect(panel.style.display).toBe("none");
+    subBtn.click();
+    expect(panel.style.display).toBe("");
+
+    const btns = [...panel.querySelectorAll<HTMLButtonElement>("button")];
+    btns.find((b) => b.textContent === "A+")!.click();
+    expect(stage.style.getPropertyValue("--sub-scale")).toBe("1.15");
+    expect(getSubSize()).toBe(1.15);
+    btns.find((b) => b.textContent === "▲")!.click();
+    btns.find((b) => b.textContent === "▲")!.click();
+    expect(stage.style.getPropertyValue("--sub-rise")).toBe("10%");
+    expect(getSubRise()).toBe(2);
+
+    // tier buttons repaint the current cue
+    Object.defineProperty(video, "currentTime", { value: 2.5, configurable: true });
+    video.dispatchEvent(new Event("timeupdate"));
+    expect(root.querySelector(".subs-overlay .hl-target")).not.toBeNull();
+    btns.find((b) => b.textContent === "off")!.click();
+    expect(getSubTier()).toBe("off");
+    expect(root.querySelector(".subs-overlay .hl-target")).toBeNull();
     root.remove();
   });
 

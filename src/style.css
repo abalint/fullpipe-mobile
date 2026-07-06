@@ -170,8 +170,11 @@ input {
                 overflow: hidden; }
 .player-stage video { display: block; width: 100%; background: #000; }
 .subs-overlay {
-  position: absolute; left: 0; right: 0; bottom: 6px; padding: 4px 10px;
-  text-align: center; font-size: 1.3rem; line-height: 1.9; color: #fff;
+  /* --sub-scale / --sub-rise are the player's size & height prefs (Aa panel) */
+  position: absolute; left: 0; right: 0;
+  bottom: calc(6px + var(--sub-rise, 0%)); padding: 4px 10px;
+  text-align: center; font-size: calc(1.3rem * var(--sub-scale, 1));
+  line-height: 1.9; color: #fff;
   font-weight: 600;
   /* classic broadcast look: white fill, black border all round */
   text-shadow:
@@ -181,7 +184,36 @@ input {
   pointer-events: none; /* gaps fall through to the stage's play/pause tap */
 }
 .subs-overlay .w { pointer-events: auto; }  /* …but words stay tappable */
-.subs-overlay .w.kw { color: #ff9f2e; }     /* noted keyword → tap for gloss */
+
+/* Word-level highlighting: TEXT COLOR ONLY over video — the prep doc's
+   background/outline chips (.unk/.tap-*) are explicitly neutralized here.
+   Known words are encoded by absence (plain white). The black outline
+   guarantees local contrast, so hues just need to differ from white:
+   warm coral family = unknown (bright + bold when mine-worthy, dimmed when
+   rare), orange = curated keyword, amber = reinforcement, faint blue =
+   corpus-tracked (audit tier only). */
+.subs-overlay .w.unk { background: none; }
+.subs-overlay .w.kw { color: #ff9f2e; }        /* noted keyword → tap for gloss */
+.subs-overlay .w.hl-hv { color: #ff6b52; font-weight: 700; } /* high-value candidate */
+.subs-overlay .w.hl-target {                    /* the i+1 sentence's one unknown */
+  color: #ff6b52; font-weight: 700;
+  text-decoration: underline 2px #ff6b52; text-underline-offset: 4px;
+}
+.subs-overlay .w.hl-unk { color: #e8907e; }     /* other unknown (dimmed coral) */
+.subs-overlay .w.hl-lrn { color: #ffc94d; }     /* reinforcement — on a young card */
+.subs-overlay .w.hl-corpus { color: #b9cfe8; }  /* known, corpus-tracked (audit) */
+/* i+1 line marker: a small text-level badge, not a background chip */
+.subs-overlay .iplus-badge {
+  color: #8fc6ff; font-size: .6em; font-weight: 700;
+  vertical-align: super; margin-right: 4px; user-select: none;
+}
+/* tap marks (after the hl-* rules so they win): a word marked known goes
+   back to plain white — absence IS the known signal; ★ high-interest goes
+   violet, distinct from every status hue */
+.subs-overlay .w.tap-k { background: none; outline: none; color: #fff;
+                         font-weight: 600; text-decoration: none; }
+.subs-overlay .w.tap-h { background: none; outline: none; color: #c58fff; }
+.subs-overlay .w.tap-h::after { color: #c58fff; }
 .subs-overlay ruby rt { color: #fff; font-weight: 500; }
 .player-view.no-ruby ruby rt { display: none; }
 
@@ -215,6 +247,16 @@ input {
 .player-controls .buttons { justify-content: space-between; }
 button.pv { flex: 1; padding: 8px 0; font-size: 1.05rem; line-height: 1; }
 button.pv.on { border-color: var(--accent); color: var(--accent); }
+
+/* subtitle settings panel (Aa): size / height steppers + highlight tier */
+.sub-panel { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px;
+             background: var(--card); border-radius: 10px; margin-top: 4px; }
+.sub-panel .lab { width: 3.6rem; font-size: .78rem; color: var(--muted);
+                  text-transform: uppercase; letter-spacing: .04em; }
+.sub-panel button { flex: 1; padding: 6px 0; font-size: .9rem; }
+.sub-panel .val { min-width: 3.4rem; text-align: center; font-size: .85rem;
+                  font-variant-numeric: tabular-nums; }
+.sub-panel button.tier.on { border-color: var(--accent); color: var(--accent); }
 
 .player-view:fullscreen { background: #000; padding: 12px;
                           justify-content: center; }
