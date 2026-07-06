@@ -1,0 +1,554 @@
+{
+ "episode": {
+  "id": "local_f1625312f2e7f58d",
+  "title": "sample"
+ },
+ "stats": {
+  "comprehensible": 5,
+  "reinforcement": 1,
+  "i_plus_1": 3,
+  "too_hard": 1,
+  "total_sentences": 10,
+  "token_comprehensibility": 0.85,
+  "known_set_size": 23,
+  "learning_size": 1,
+  "unknown_lemmas": 6,
+  "candidates_dropped_by_cap": 0
+ },
+ "curate": {
+  "synopsis": "A quiet slice-of-life narration: the speaker has breakfast and heads to the park on a fine day, meets a big dog guarding its territory, and walks the park's perimeter with a friend in the evening. Ends on wanting to return tomorrow.",
+  "synopsis_segs": [
+   [
+    "A quiet slice-of-life narration: the speaker has breakfast and heads to the park on a fine day, meets a big dog guarding its territory, and walks the park's perimeter with a friend in the evening. Ends on wanting to return tomorrow.",
+    null
+   ]
+  ],
+  "focal_points": [
+   {
+    "word": "縄張り",
+    "why": "the dog's territorial behavior is the episode's one dramatic beat; everything at the park hinges on it",
+    "why_segs": [
+     [
+      "the dog's territorial behavior is the episode's one dramatic beat; everything at the park hinges on it",
+      null
+     ]
+    ]
+   },
+   {
+    "word": "吠える",
+    "why": "highest-frequency unknown verb (rank ~3200) and the audible event you'll hear before you parse it",
+    "why_segs": [
+     [
+      "highest-frequency unknown verb (rank ~3200) and the audible event you'll hear before you parse it",
+      null
+     ]
+    ]
+   },
+   {
+    "word": "夕方",
+    "why": "most frequent unknown overall (rank ~2800); anchors the episode's time structure",
+    "why_segs": [
+     [
+      "most frequent unknown overall (rank ~2800); anchors the episode's time structure",
+      null
+     ]
+    ]
+   }
+  ]
+ },
+ "glossary": [
+  {
+   "lemma": "縄張り",
+   "reading": "なわばり",
+   "freq_rank": 6100,
+   "recurrence": 1,
+   "gloss": "territory",
+   "gloss_segs": [
+    [
+     "territory",
+     null
+    ]
+   ],
+   "note_segs": []
+  },
+  {
+   "lemma": "吠える",
+   "reading": "ほえ",
+   "freq_rank": 3200,
+   "recurrence": 1,
+   "gloss": "to bark",
+   "gloss_segs": [
+    [
+     "to bark",
+     null
+    ]
+   ],
+   "note_segs": []
+  },
+  {
+   "lemma": "夕方",
+   "reading": "ゆうがた",
+   "freq_rank": 2800,
+   "recurrence": 1,
+   "gloss": "early evening",
+   "gloss_segs": [
+    [
+     "early evening",
+     null
+    ]
+   ],
+   "note_segs": []
+  },
+  {
+   "lemma": "頑丈",
+   "reading": "がんじょう",
+   "freq_rank": 7900,
+   "recurrence": 1,
+   "gloss": "sturdy",
+   "gloss_segs": [
+    [
+     "sturdy",
+     null
+    ]
+   ],
+   "note_segs": []
+  },
+  {
+   "lemma": "柵",
+   "reading": "さく",
+   "freq_rank": null,
+   "recurrence": 1,
+   "gloss": "fence",
+   "gloss_segs": [
+    [
+     "fence",
+     null
+    ]
+   ],
+   "note_segs": []
+  }
+ ],
+ "iplus1": [
+  {
+   "lemma": "夕方",
+   "reading": "ゆうがた",
+   "sentence_idx": 5
+  },
+  {
+   "lemma": "吠える",
+   "reading": "ほえ",
+   "sentence_idx": 4
+  },
+  {
+   "lemma": "縄張り",
+   "reading": "なわばり",
+   "sentence_idx": 3
+  }
+ ],
+ "reinforcement": [
+  7
+ ],
+ "sentences_by_idx": {
+  "3": {
+   "idx": 3,
+   "start": 15.0,
+   "tokens": [
+    {
+     "s": "その",
+     "l": "その",
+     "r": "その",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "犬",
+     "l": "犬",
+     "r": "いぬ",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "は",
+     "l": "は",
+     "r": "は",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "自分",
+     "l": "自分",
+     "r": "じぶん",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "の",
+     "l": "の",
+     "r": "の",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "縄張り",
+     "l": "縄張り",
+     "r": "なわばり",
+     "c": true,
+     "k": false
+    },
+    {
+     "s": "を",
+     "l": "を",
+     "r": "を",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "守っ",
+     "l": "守る",
+     "r": "まもっ",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "て",
+     "l": "て",
+     "r": "て",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "い",
+     "l": "いる",
+     "r": "い",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "まし",
+     "l": "ます",
+     "r": "まし",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "た",
+     "l": "た",
+     "r": "た",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "。",
+     "l": "。",
+     "r": "。",
+     "c": false,
+     "k": false
+    }
+   ]
+  },
+  "4": {
+   "idx": 4,
+   "start": 19.5,
+   "tokens": [
+    {
+     "s": "犬",
+     "l": "犬",
+     "r": "いぬ",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "は",
+     "l": "は",
+     "r": "は",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "大きな",
+     "l": "大きな",
+     "r": "おおきな",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "声",
+     "l": "声",
+     "r": "こえ",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "で",
+     "l": "で",
+     "r": "で",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "吠え",
+     "l": "吠える",
+     "r": "ほえ",
+     "c": true,
+     "k": false
+    },
+    {
+     "s": "まし",
+     "l": "ます",
+     "r": "まし",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "た",
+     "l": "た",
+     "r": "た",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "。",
+     "l": "。",
+     "r": "。",
+     "c": false,
+     "k": false
+    }
+   ]
+  },
+  "5": {
+   "idx": 5,
+   "start": 24.0,
+   "tokens": [
+    {
+     "s": "夕方",
+     "l": "夕方",
+     "r": "ゆうがた",
+     "c": true,
+     "k": false
+    },
+    {
+     "s": "、",
+     "l": "、",
+     "r": "、",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "友達",
+     "l": "友達",
+     "r": "ともだち",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "と",
+     "l": "と",
+     "r": "と",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "一緒",
+     "l": "一緒",
+     "r": "いっしょ",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "に",
+     "l": "に",
+     "r": "に",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "公園",
+     "l": "公園",
+     "r": "こうえん",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "の",
+     "l": "の",
+     "r": "の",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "周り",
+     "l": "周り",
+     "r": "まわり",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "を",
+     "l": "を",
+     "r": "を",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "歩き",
+     "l": "歩く",
+     "r": "あるき",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "まし",
+     "l": "ます",
+     "r": "まし",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "た",
+     "l": "た",
+     "r": "た",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "。",
+     "l": "。",
+     "r": "。",
+     "c": false,
+     "k": false
+    }
+   ]
+  },
+  "6": {
+   "idx": 6,
+   "start": 32.0,
+   "tokens": [
+    {
+     "s": "公園",
+     "l": "公園",
+     "r": "こうえん",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "の",
+     "l": "の",
+     "r": "の",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "柵",
+     "l": "柵",
+     "r": "さく",
+     "c": true,
+     "k": false
+    },
+    {
+     "s": "は",
+     "l": "は",
+     "r": "は",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "とても",
+     "l": "とても",
+     "r": "とても",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "頑丈",
+     "l": "頑丈",
+     "r": "がんじょう",
+     "c": true,
+     "k": false
+    },
+    {
+     "s": "です",
+     "l": "です",
+     "r": "です",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "。",
+     "l": "。",
+     "r": "。",
+     "c": false,
+     "k": false
+    }
+   ]
+  },
+  "7": {
+   "idx": 7,
+   "start": 37.5,
+   "tokens": [
+    {
+     "s": "毎日",
+     "l": "毎日",
+     "r": "まいにち",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "、",
+     "l": "、",
+     "r": "、",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "犬",
+     "l": "犬",
+     "r": "いぬ",
+     "c": true,
+     "k": true
+    },
+    {
+     "s": "と",
+     "l": "と",
+     "r": "と",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "散歩",
+     "l": "散歩",
+     "r": "さんぽ",
+     "c": true,
+     "k": false
+    },
+    {
+     "s": "を",
+     "l": "を",
+     "r": "を",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "し",
+     "l": "する",
+     "r": "し",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "ます",
+     "l": "ます",
+     "r": "ます",
+     "c": false,
+     "k": false
+    },
+    {
+     "s": "。",
+     "l": "。",
+     "r": "。",
+     "c": false,
+     "k": false
+    }
+   ]
+  }
+ }
+}

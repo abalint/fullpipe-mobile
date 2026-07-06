@@ -1,0 +1,166 @@
+/* Visual language carried over from fullPipe/render/template.html so the
+   in-app prep doc reads identically to the static one. */
+
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #777; --card: #f4f4f6;
+  --accent: #4a90d9; --know: #2e9e5b; --dunno: #d9544a; --hl: #fff3c4;
+  --border: #e0e0e4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181c; --fg: #e8e8ea; --muted: #9a9aa2; --card: #23242a;
+    --accent: #6aa9e9; --know: #4dbf7f; --dunno: #e9756c; --hl: #4a4020;
+    --border: #33343c;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: "Hiragino Sans", "Noto Sans JP", -apple-system, Roboto, sans-serif;
+  line-height: 1.7;
+  display: flex; flex-direction: column;
+}
+main#outlet {
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 16px; padding-top: calc(16px + env(safe-area-inset-top));
+  max-width: 720px; width: 100%; margin-inline: auto;
+}
+nav {
+  display: flex; border-top: 1px solid var(--border); background: var(--card);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+nav a {
+  flex: 1; text-align: center; padding: 12px 0; color: var(--muted);
+  text-decoration: none; font-size: .9rem;
+}
+nav a.active { color: var(--accent); font-weight: 600; }
+
+h1 { font-size: 1.25rem; margin: 0 0 4px; }
+h2 { font-size: 1rem; color: var(--muted); margin: 28px 0 10px;
+     text-transform: uppercase; letter-spacing: .06em; }
+
+.stats { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted);
+         font-size: .85rem; margin-bottom: 8px; }
+.stats b { color: var(--fg); }
+.status { color: var(--muted); font-size: .85rem; margin: 8px 0; }
+.muted { color: var(--muted); font-size: .85rem; }
+.err { color: var(--dunno); font-size: .85rem; }
+
+.synopsis { background: var(--card); border-radius: 10px; padding: 12px 14px; }
+.sent { background: var(--card); border-radius: 10px; padding: 10px 14px;
+        margin-bottom: 10px; }
+.sent .time { font-size: .75rem; color: var(--muted); }
+.sent .time.seek { color: var(--accent); cursor: pointer; }
+
+.w { cursor: pointer; border-radius: 4px; padding: 0 1px; }
+.w.unk { background: var(--hl); }
+.w.target { border-bottom: 2px solid var(--accent); font-weight: 600; }
+.w.tap-k { background: color-mix(in srgb, var(--know) 25%, transparent);
+           outline: 1px solid var(--know); }
+.w.tap-h { background: color-mix(in srgb, var(--accent) 25%, transparent);
+           outline: 1px solid var(--accent); }
+.w.tap-h::after { content: "★"; font-size: .7em; color: var(--accent);
+                  vertical-align: super; }
+/* already submitted & unchanged — muted outline so newly added/changed marks
+   (solid outline) read as the unsent ones */
+.w.tap-committed { outline-style: dashed; opacity: .8; }
+
+.gloss { display: grid; grid-template-columns: max-content max-content 1fr minmax(4ch, auto);
+         gap: 6px 12px; align-items: end; }
+.gloss .w { font-size: 1.05rem; }
+.gloss .r { color: var(--muted); font-size: .8rem; }
+.gloss .n { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.gloss .n .rec { opacity: .7; }
+.gloss .m { color: var(--muted); font-size: .85rem; overflow-wrap: anywhere; }
+.gloss .m[data-i] { cursor: pointer; }
+.gloss .m.masked { letter-spacing: 3px; opacity: .55; }
+ruby rt { font-size: .5em; color: var(--muted); user-select: none; }
+.legend { font-size: .8rem; color: var(--muted); margin: 6px 0 0; }
+
+button, .btn {
+  font: inherit; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--card); color: var(--fg); padding: 10px 16px;
+  cursor: pointer; text-decoration: none; display: inline-block;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .5; }
+button.small, .btn.small { padding: 5px 10px; font-size: .8rem; border-radius: 8px; }
+h2 button { margin-left: 8px; vertical-align: middle; padding: 4px 10px;
+            font-size: .8rem; border-radius: 8px; }
+.btnrow { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+
+input {
+  font: inherit; width: 100%; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--card); color: var(--fg);
+}
+.field { display: block; margin-bottom: 12px; }
+.field-label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: 4px; }
+
+.enqueue { display: flex; gap: 8px; margin-bottom: 12px; }
+.enqueue input { flex: 1; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+/* staged-and-unwatched hours, right-aligned next to the queue buttons */
+.toolbar .backlog {
+  margin-left: auto; color: var(--muted); font-size: .85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* swipe-to-delete: the row slides left over a fixed delete button */
+.swipe { position: relative; overflow: hidden; border-radius: 10px; margin-bottom: 8px; }
+.swipe-del {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 88px;
+  border: none; border-radius: 0; background: #c0392b; color: #fff;
+  font: inherit; font-size: .9rem;
+}
+.swipe-content { position: relative; touch-action: pan-y; }
+.swipe .job { margin-bottom: 0; }
+
+.job { display: flex; align-items: center; gap: 10px; background: var(--card);
+       border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
+.job-main { flex: 1; min-width: 0; }
+.job-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+             color: var(--fg); text-decoration: none; }
+.job-sub { font-size: .8rem; }
+.job-actions { display: flex; gap: 6px; }
+
+/* 5-star rating: bare glyph buttons, big enough tap targets for a thumb */
+.stars { display: flex; gap: 2px; margin-top: 2px; }
+.stars .star {
+  border: none; background: none; padding: 4px 5px; font-size: 1.25rem;
+  line-height: 1; color: var(--muted); border-radius: 6px;
+}
+.stars .star.on { color: #f5b301; }
+
+/* Taste tags: appear under the stars once rated. Grouped by valence; on-state
+   borrows the know/dunno chip colors. All six always shown (cross-valence
+   combos are informative) — see fullPipe DESIGN.md, Taste metadata. */
+.rating { display: flex; flex-direction: column; gap: 5px; margin-top: 3px; }
+.tagpicker { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.taggroup { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.taglabel { font-size: .62rem; color: var(--muted); text-transform: uppercase;
+            letter-spacing: .05em; margin-right: 1px; }
+.tag { font-size: .74rem; padding: 3px 9px; border-radius: 99px; line-height: 1.3;
+       border: 1px solid var(--border); background: transparent; color: var(--muted); }
+.taggroup.pos .tag.on { color: var(--know); border-color: color-mix(in srgb, var(--know) 45%, transparent);
+       background: color-mix(in srgb, var(--know) 20%, transparent); }
+.taggroup.neg .tag.on { color: var(--dunno); border-color: color-mix(in srgb, var(--dunno) 45%, transparent);
+       background: color-mix(in srgb, var(--dunno) 20%, transparent); }
+
+.chip { font-size: .72rem; padding: 1px 8px; border-radius: 99px;
+        background: var(--border); color: var(--muted); }
+.chip.st-prepared { background: color-mix(in srgb, var(--accent) 25%, transparent); color: var(--accent); }
+.chip.st-staged { background: color-mix(in srgb, var(--know) 25%, transparent); color: var(--know); }
+.chip.st-reconciled { background: color-mix(in srgb, var(--accent) 25%, transparent); color: var(--accent); }
+.chip.st-failed { background: color-mix(in srgb, var(--dunno) 25%, transparent); color: var(--dunno); }
+.chip.st-downloading, .chip.st-transcribing, .chip.st-tokenizing, .chip.st-curating {
+  background: color-mix(in srgb, var(--hl) 60%, transparent); color: var(--fg); }
+
+.submit-bar {
+  position: sticky; bottom: 0; display: flex; gap: 8px; align-items: center;
+  background: var(--bg); padding: 10px 0; border-top: 1px solid var(--border);
+  margin-top: 20px;
+}
+
+.player-view video { width: 100%; border-radius: 10px; background: #000;
+                     margin-bottom: 12px; }

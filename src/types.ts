@@ -1,0 +1,90 @@
+// Shapes shared with the PC side. Prep-doc fields mirror fullPipe/render
+// (template.html DATA); job lifecycle mirrors MOBILE.md.
+
+export type JobState =
+  | "queued"
+  | "downloading"
+  | "transcribing"
+  | "tokenizing"
+  | "prepared"
+  | "curating"
+  | "staged"
+  | "watched"
+  | "reconciled"
+  | "failed";
+
+export interface Job {
+  episode_id: string;
+  source: string;
+  title?: string;
+  state: JobState;
+  progress?: number; // 0..1 within the current state, if the worker reports it
+  rating?: number | null; // 1-5 stars from the ledger; null/absent = unrated
+  tags?: string[]; // taste tags on the latest review (RATING_TAGS slugs)
+  duration?: number | null; // runtime in seconds, once Stage 1 has artifacts
+  error?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** Annotated prose: [chunk, reading|null] pairs, pre-tokenized on the PC. */
+export type Segs = [string, string | null][];
+
+export interface Token {
+  s: string; // surface
+  r?: string | null; // reading (kana), only where furigana applies
+  l?: string; // lemma
+  c?: number | boolean; // content word (tappable)
+  k?: number | boolean; // known per ledger
+}
+
+export interface Sentence {
+  start: number;
+  end?: number;
+  tokens: Token[];
+}
+
+export interface GlossEntry {
+  lemma: string;
+  reading?: string;
+  gloss?: string;
+  gloss_segs?: Segs;
+  note_segs?: Segs;
+  recurrence?: number;
+}
+
+export interface FocalPoint {
+  word: string;
+  why?: string;
+  why_segs?: Segs;
+}
+
+export interface PrepDoc {
+  episode: { id: string; title?: string };
+  stats: {
+    token_comprehensibility: number;
+    total_sentences: number;
+    i_plus_1: number;
+    reinforcement: number;
+    [k: string]: number;
+  };
+  curate?: {
+    synopsis?: string;
+    synopsis_segs?: Segs;
+    focal_points?: FocalPoint[];
+  };
+  glossary: GlossEntry[];
+  iplus1: { lemma: string; reading?: string; sentence_idx: number }[];
+  reinforcement: number[];
+  sentences_by_idx: Record<string, Sentence>;
+}
+
+/** "k" = I know this (ledger evidence) · "h" = high interest (card priority).
+    Unknown needs no mark — candidates are presumed unknown. */
+export type TapMark = "k" | "h";
+
+export interface TapBatch {
+  episode_id: string;
+  batch_id: string;
+  taps: [string, TapMark][];
+}

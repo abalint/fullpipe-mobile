@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cleartext HTTP is allowed app-wide: the only thing this app ever talks to
+     is the fullPipe server inside the tailnet, where WireGuard already
+     encrypts the wire (MOBILE.md "Transport"). Scoping by hostname would
+     silently break raw-IP server URLs (Android never matches IP literals
+     against <domain> rules) for zero real security gain. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

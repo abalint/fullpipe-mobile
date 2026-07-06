@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- app-internal files (Directory.Data) — downloaded episode videos live
+         here and are handed to VLC via content:// grants -->
+    <files-path name="files" path="." />
+    <external-path name="my_images" path="." />
+    <cache-path name="my_cache_images" path="." />
+</paths>
