@@ -14,12 +14,14 @@ const outlet = document.getElementById("outlet")!;
 
 function route(): void {
   const hash = location.hash || "#/queue";
-  const [, view, arg] = hash.split("/").map(decodeURIComponent);
+  // #/player/<id>/<seconds> deep-links a start position (prep-doc timestamps)
+  const [, view, arg, arg2] = hash.split("/").map(decodeURIComponent);
   outlet.textContent = "";
 
   let node: HTMLElement;
   if (view === "prep" && arg) node = prepView(arg);
-  else if (view === "player" && arg) node = playerView(arg);
+  else if (view === "player" && arg)
+    node = playerView(arg, arg2 !== undefined && arg2 !== "" ? Number(arg2) : undefined);
   else if (view === "settings") node = settingsView();
   else if (view === "prep") {
     // bare prep tab → most recently cached doc, else nudge to queue

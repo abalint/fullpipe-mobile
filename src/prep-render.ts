@@ -15,7 +15,7 @@ function el(tag: string, cls?: string, text?: string): HTMLElement {
   return n;
 }
 
-function rubyWord(text: string, reading?: string | null): Node {
+export function rubyWord(text: string, reading?: string | null): Node {
   if (!(reading && HAS_KANJI.test(text) && reading !== text))
     return document.createTextNode(text);
   const r = document.createElement("ruby");
@@ -26,13 +26,15 @@ function rubyWord(text: string, reading?: string | null): Node {
   return r;
 }
 
-function segsNode(segs?: Segs): DocumentFragment {
+// exported for the player's keyword-gloss popup (notes are ruby-annotated)
+export function segsNode(segs?: Segs): DocumentFragment {
   const frag = document.createDocumentFragment();
   (segs || []).forEach(([text, reading]) => frag.appendChild(rubyWord(text, reading)));
   return frag;
 }
 
-function tokenSpan(t: Token, targetLemma: string | null): Node {
+// exported for the player's subtitle overlay — same markup, same tap classes
+export function tokenSpan(t: Token, targetLemma: string | null): Node {
   if (!t.c) return document.createTextNode(t.s);
   const cls = ["w"];
   if (!t.k) cls.push("unk");

@@ -1,9 +1,9 @@
 # fullPipe mobile — Android client
 
 The phone side of `fullPipe/MOBILE.md`: queue screen · prep-doc viewer with
-know/don't-know taps · tap outbox with idempotent sync · video player with the
-analysis subs · 1–5★ rating + taste-tag picker · Android share-sheet enqueue
-target. Capacitor (web UI wrapped
+know/don't-know taps · tap outbox with idempotent sync · in-app learning
+player (tokenized tap-able subs, replay-line, speed) · 1–5★ rating +
+taste-tag picker · Android share-sheet enqueue target. Capacitor (web UI wrapped
 native); the prep viewer is a TS port of `fullPipe/render/template.html`, so
 the in-app doc looks and behaves like the static one.
 
@@ -60,13 +60,31 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   shown regardless of the star); taps are debounced and append a review via
   `POST /rating {rating, tags}` — re-rating never overwrites, the server's
   on-read verdict takes the latest. Current rating + tags come back on `GET /jobs`.
-- **Video** streams from the server (HTTP range → seeking works) with the SRT
-  sidecar converted to WebVTT in memory. Local video caching + WorkManager
-  background pulls (the MOBILE.md decoupled-pull flow) are not built yet.
+- **Player** (`#/player/<id>[/<sec>]`): plays the downloaded file when present
+  (Capacitor local server → seek works), else streams from the sync server.
+  Subtitles are an overlay built from the tokenized transcript
+  (`GET /transcript`, cached at download as `videos/<ep>.transcript.json`) —
+  every content word is a tap target feeding the *same* per-episode tap store
+  as the prep doc, so watch-time marks ride the next Submit; plain-SRT
+  fallback when no transcript exists. Cues linger until the next line (capped
+  +2.5 s) so ASR sentence-end timing doesn't cut subs off early; classic
+  white-on-black-outline styling. Prep-doc keywords (curated gloss rows +
+  focal points) render orange. Tapping **any** word pops a dictionary card:
+  curated gloss/note/focal-why on top (keywords), JMdict senses below (from
+  `GET /definitions`, cached at download as `videos/<ep>.definitions.json` —
+  needs a one-off `tools.jmdict build` on the PC), and the mark button
+  (known ✓ / interest ★) inside — marking moved into the popup.
+  `cc` button cycles subtitle modes: on / kw (hidden unless the line carries
+  a keyword or ★-marked word) / off. Controls: replay-current-line, prev/next
+  line, speed cycle, furigana toggle, fullscreen (+landscape lock), resume
+  position (cleared at watched), wake lock while playing. Prep-doc sentence
+  timestamps deep-link into the player at that moment. VLC handoff survives
+  as a fallback button. WorkManager background pulls (the MOBILE.md
+  decoupled-pull flow) are not built yet.
 - First run with no server configured lands on Settings.
 
 ## Not yet built
 
 - background video pull (WorkManager, unmetered+charging) + retention/pin UI —
-  the player currently streams from the server instead
+  downloads are manual (⬇ buttons) for now
 - deep-link into AnkiDroid

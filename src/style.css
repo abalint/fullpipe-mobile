@@ -162,5 +162,65 @@ input {
   margin-top: 20px;
 }
 
-.player-view video { width: 100%; border-radius: 10px; background: #000;
-                     margin-bottom: 12px; }
+/* --- in-app player ----------------------------------------------------------
+   Stage (video + subtitle overlay) over a custom control bar; native controls
+   are off so they can never sit on top of the tappable subs. */
+.player-view { display: flex; flex-direction: column; gap: 10px; }
+.player-stage { position: relative; background: #000; border-radius: 10px;
+                overflow: hidden; }
+.player-stage video { display: block; width: 100%; background: #000; }
+.subs-overlay {
+  position: absolute; left: 0; right: 0; bottom: 6px; padding: 4px 10px;
+  text-align: center; font-size: 1.3rem; line-height: 1.9; color: #fff;
+  font-weight: 600;
+  /* classic broadcast look: white fill, black border all round */
+  text-shadow:
+    -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000,
+    -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000,
+    0 0 6px rgba(0, 0, 0, .8);
+  pointer-events: none; /* gaps fall through to the stage's play/pause tap */
+}
+.subs-overlay .w { pointer-events: auto; }  /* …but words stay tappable */
+.subs-overlay .w.kw { color: #ff9f2e; }     /* noted keyword → tap for gloss */
+.subs-overlay ruby rt { color: #fff; font-weight: 500; }
+.player-view.no-ruby ruby rt { display: none; }
+
+/* keyword gloss card, floated above the subtitle line */
+.gloss-pop {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 84px;
+  max-width: min(92%, 480px); padding: 10px 14px; border-radius: 12px;
+  background: rgba(10, 10, 12, .92); color: #f2f2f2; font-size: .95rem;
+  line-height: 1.7; text-align: left; box-shadow: 0 4px 18px rgba(0, 0, 0, .5);
+}
+.gloss-pop .gp-head { display: flex; align-items: center; gap: 10px;
+                      font-size: 1.15rem; font-weight: 600; }
+.gloss-pop .gp-head ruby rt { color: #bbb; }
+.gloss-pop .gp-mark { margin-left: auto; padding: 4px 10px; font-size: .78rem;
+                      background: transparent; color: #ddd; border-color: #555; }
+.gloss-pop .gp-gloss { color: #ffd9a8; }
+.gloss-pop .gp-note, .gloss-pop .gp-why { color: #cfcfcf; font-size: .88rem; }
+.gloss-pop .gp-why::before { content: "★ "; color: #ff9f2e; }
+.gloss-pop .gp-dict { margin-top: 4px; }
+.gloss-pop .gp-reading { color: #9ecbff; margin-right: 6px; }
+.gloss-pop .gp-pos { color: #8fbf8f; font-size: .72rem; margin-right: 6px;
+                     text-transform: lowercase; }
+.gloss-pop .gp-sense { color: #e8e8e8; }
+.gloss-pop .gp-none { color: #999; font-style: italic; }
+
+.player-controls { display: flex; flex-direction: column; gap: 4px; }
+.player-controls .row { display: flex; gap: 6px; align-items: center; }
+.player-controls input[type="range"] { flex: 1; accent-color: var(--accent);
+                                       min-width: 0; }
+.player-controls .clock { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.player-controls .buttons { justify-content: space-between; }
+button.pv { flex: 1; padding: 8px 0; font-size: 1.05rem; line-height: 1; }
+button.pv.on { border-color: var(--accent); color: var(--accent); }
+
+.player-view:fullscreen { background: #000; padding: 12px;
+                          justify-content: center; }
+.player-view:fullscreen h1, .player-view:fullscreen .btnrow { display: none; }
+.player-view:fullscreen .player-stage { border-radius: 0; min-height: 0; }
+.player-view:fullscreen video { max-height: calc(100vh - 90px); }
+.player-view:fullscreen .player-controls button,
+.player-view:fullscreen .clock { background: transparent; color: #ddd;
+                                 border-color: #444; }

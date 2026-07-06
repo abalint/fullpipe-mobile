@@ -256,15 +256,18 @@ function jobRow(job: Job, rerender: () => void): HTMLElement {
     open.href = `#/prep/${encodeURIComponent(job.episode_id)}`;
     actions.appendChild(open);
   }
-  // video: download once Stage 1 has it, then hand off to VLC
+  // video: download once Stage 1 has it, then play in-app (VLC as fallback)
   if (HAS_VIDEO.includes(job.state)) {
     const ep = job.episode_id;
     if (getVideoRecord(ep)) {
-      const play = el("button", "small", "▶ VLC") as HTMLButtonElement;
-      play.addEventListener("click", () => {
+      const play = el("a", "small btn", "▶ play") as HTMLAnchorElement;
+      play.href = `#/player/${encodeURIComponent(ep)}`;
+      actions.appendChild(play);
+      const vlc = el("button", "small", "VLC") as HTMLButtonElement;
+      vlc.addEventListener("click", () => {
         void playVideo(ep, job.title).catch((e) => alert((e as Error).message));
       });
-      actions.appendChild(play);
+      actions.appendChild(vlc);
     } else {
       const dl = el("button", "small", "⬇ video") as HTMLButtonElement;
       dl.addEventListener("click", async () => {
@@ -283,6 +286,10 @@ function jobRow(job: Job, rerender: () => void): HTMLElement {
         }
       });
       actions.appendChild(dl);
+      // not downloaded yet — the in-app player can still stream it
+      const stream = el("a", "small btn", "▶ stream") as HTMLAnchorElement;
+      stream.href = `#/player/${encodeURIComponent(ep)}`;
+      actions.appendChild(stream);
     }
   }
   row.appendChild(actions);

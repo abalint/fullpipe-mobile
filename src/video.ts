@@ -5,9 +5,10 @@
 // mark-watched.
 
 import { registerPlugin } from "@capacitor/core";
-import { Directory, Filesystem } from "@capacitor/filesystem";
+import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { api } from "./api";
 import { getSettings } from "./store";
+import type { Definitions, TranscriptDoc } from "./types";
 
 interface ExternalPlayerPlugin {
   play(opts: { video: string; subs?: string; title?: string }): Promise<void>;
@@ -17,11 +18,29 @@ const ExternalPlayer = registerPlugin<ExternalPlayerPlugin>("ExternalPlayer");
 export interface VideoRecord {
   path: string;
   subsPath?: string;
+  transcriptPath?: string; // tokenized sentence track (absent on old records)
+  defsPath?: string; // per-episode JMdict definitions (absent on old records)
   size: number;
   at: string;
 }
 
 const key = (ep: string) => `fp.video.${ep}`;
+const posKey = (ep: string) => `fp.pos.${ep}`;
+
+/** Resume position, seconds. Cleared with the video / at mark-watched. */
+export function getPosition(ep: string): number | null {
+  const raw = localStorage.getItem(posKey(ep));
+  const n = raw == null ? NaN : Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function savePosition(ep: string, seconds: number): void {
+  localStorage.setItem(posKey(ep), String(seconds));
+}
+
+export function clearPosition(ep: string): void {
+  localStorage.removeItem(posKey(ep));
+}
 
 export function getVideoRecord(ep: string): VideoRecord | null {
   try {
@@ -60,6 +79,8 @@ export async function downloadVideo(
   const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
   const vPath = `videos/${ep}.mp4`;
   const sPath = `videos/${ep}.srt`;
+  const tPath = `videos/${ep}.transcript.json`;
+  const dPath = `videos/${ep}.definitions.json`;
   // downloadFile doesn't create parent dirs despite recursive:true (ENOENT)
   await ensureVideosDir();
 
@@ -90,10 +111,42 @@ export async function downloadVideo(
     } catch {
       /* subs are best-effort */
     }
+    // tokenized sentence track for the in-app player (best-effort like subs —
+    // without it the player falls back to plain SRT cues)
+    let transcriptPath: string | undefined;
+    try {
+      await Filesystem.downloadFile({
+        url: api.transcriptUrl(ep),
+        headers,
+        path: tPath,
+        directory: Directory.Data,
+        recursive: true,
+      });
+      transcriptPath = tPath;
+    } catch {
+      /* transcript is best-effort */
+    }
+    // per-episode dictionary for the any-word popup (best-effort; {} until
+    // the PC has built jmdict.db)
+    let defsPath: string | undefined;
+    try {
+      await Filesystem.downloadFile({
+        url: api.definitionsUrl(ep),
+        headers,
+        path: dPath,
+        directory: Directory.Data,
+        recursive: true,
+      });
+      defsPath = dPath;
+    } catch {
+      /* definitions are best-effort */
+    }
     const stat = await Filesystem.stat({ path: vPath, directory: Directory.Data });
     const rec: VideoRecord = {
       path: vPath,
       subsPath,
+      transcriptPath,
+      defsPath,
       size: stat.size,
       at: new Date().toISOString(),
     };
@@ -107,7 +160,7 @@ export async function downloadVideo(
 export async function deleteVideo(ep: string): Promise<void> {
   const rec = getVideoRecord(ep);
   if (rec) {
-    for (const p of [rec.path, rec.subsPath]) {
+    for (const p of [rec.path, rec.subsPath, rec.transcriptPath, rec.defsPath]) {
       if (!p) continue;
       try {
         await Filesystem.deleteFile({ path: p, directory: Directory.Data });
@@ -117,6 +170,32 @@ export async function deleteVideo(ep: string): Promise<void> {
     }
   }
   localStorage.removeItem(key(ep));
+  clearPosition(ep);
+}
+
+async function readLocalJson<T>(path: string | undefined): Promise<T | null> {
+  if (!path) return null;
+  try {
+    const { data } = await Filesystem.readFile({
+      path,
+      directory: Directory.Data,
+      encoding: Encoding.UTF8,
+    });
+    return JSON.parse(data as string) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** The downloaded tokenized track, or null when absent/unreadable (older
+    download, endpoint missing) — the player then falls back to SRT/stream. */
+export function loadLocalTranscript(ep: string): Promise<TranscriptDoc | null> {
+  return readLocalJson<TranscriptDoc>(getVideoRecord(ep)?.transcriptPath);
+}
+
+/** The downloaded per-episode dictionary, or null (older download / no db). */
+export function loadLocalDefinitions(ep: string): Promise<Definitions | null> {
+  return readLocalJson<Definitions>(getVideoRecord(ep)?.defsPath);
 }
 
 /** Launch the downloaded episode in VLC (or whatever handles video/mp4). */

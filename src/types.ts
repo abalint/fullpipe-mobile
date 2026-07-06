@@ -44,6 +44,34 @@ export interface Sentence {
   tokens: Token[];
 }
 
+/** One subtitle cue for the player: a prep-shaped sentence with timing. */
+export interface TranscriptSentence {
+  idx: number;
+  start: number;
+  end: number;
+  tokens: Token[];
+}
+
+/** GET /transcript/{id} — every sentence, unlike prep's i+1 subset. */
+export interface TranscriptDoc {
+  episode_id: string;
+  sentences: TranscriptSentence[];
+}
+
+/** One JMdict sense/entry, compact wire form (tools/jmdict.py). */
+export interface DictSense {
+  pos: string[];
+  g: string[]; // english glosses
+}
+export interface DictEntry {
+  k: string[]; // kanji forms
+  r: string[]; // readings
+  s: DictSense[];
+}
+
+/** GET /definitions/{id} — lemma → JMdict entries for the episode's words. */
+export type Definitions = Record<string, DictEntry[]>;
+
 export interface GlossEntry {
   lemma: string;
   reading?: string;

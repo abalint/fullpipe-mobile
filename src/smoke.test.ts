@@ -1,5 +1,6 @@
 // DOM-level smoke tests for the pieces with real logic: prep rendering, tap
-// cycling, the outbox round-trip (incl. idempotent batch_id), and SRT→VTT.
+// cycling, and the outbox round-trip (incl. idempotent batch_id). The player
+// (SRT parsing, cue lookup, overlay taps) is covered in player.test.ts.
 // Run: npx vitest run
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +17,6 @@ import {
   submitTaps,
 } from "./store";
 import { flushOutbox } from "./sync";
-import { srtToVtt } from "./views/player";
 import { hms, starBar } from "./views/queue";
 
 const doc = demo as unknown as PrepDoc;
@@ -170,16 +170,5 @@ describe("hms", () => {
     expect(hms(838.759)).toBe("00:13:59");
     expect(hms(3600 + 25 * 60 + 10)).toBe("01:25:10");
     expect(hms(10 * 3600)).toBe("10:00:00");
-  });
-});
-
-describe("srtToVtt", () => {
-  it("converts cue numbers and comma timestamps", () => {
-    const srt = "1\n00:00:01,000 --> 00:00:03,500\nこんにちは\n\n2\n00:00:04,000 --> 00:00:06,000\n元気？\n";
-    const vtt = srtToVtt(srt);
-    expect(vtt.startsWith("WEBVTT\n")).toBe(true);
-    expect(vtt).toContain("00:00:01.000 --> 00:00:03.500");
-    expect(vtt).toContain("こんにちは");
-    expect(vtt).not.toMatch(/\n1\n/);
   });
 });

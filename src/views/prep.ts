@@ -63,14 +63,17 @@ export function prepView(episodeId: string): HTMLElement {
     const noCardsBtn = el("button", "", "Watched · no cards") as HTMLButtonElement;
     const copyBtn = el("button", "", "Copy blob") as HTMLButtonElement;
     const barStatus = el("span", "muted");
+    const watch = el("a", "btn", "▶ watch") as HTMLAnchorElement;
+    watch.href = `#/player/${encodeURIComponent(episodeId)}`;
+    bar.append(watch);
     if (getVideoRecord(episodeId)) {
-      const play = el("button", "", "▶ VLC") as HTMLButtonElement;
-      play.addEventListener("click", () => {
+      const vlc = el("button", "", "VLC") as HTMLButtonElement;
+      vlc.addEventListener("click", () => {
         void playVideo(episodeId, doc.episode.title).catch(
           (e) => (barStatus.textContent = `⚠ ${(e as Error).message}`),
         );
       });
-      bar.append(play);
+      bar.append(vlc);
     }
     bar.append(submit, watchedBtn, noCardsBtn, copyBtn, barStatus);
 
@@ -115,6 +118,9 @@ export function prepView(episodeId: string): HTMLElement {
     const body = renderPrep(doc, {
       onTapsChanged: updateSubmit,
       registerRefresh: (fn) => (refreshTaps = fn),
+      // sentence timestamps jump into the in-app player at that moment
+      onSeek: (sec) =>
+        (location.hash = `#/player/${encodeURIComponent(episodeId)}/${Math.floor(sec)}`),
     });
     body.insertBefore(title, body.firstChild);
     root.append(body, bar);
