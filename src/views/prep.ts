@@ -158,14 +158,19 @@ export function prepView(episodeId: string): HTMLElement {
         const res = await api.markWatched(episodeId, pushCards);
         const c = res.cards;
         if (c?.error) {
+          // pre-async servers pushed synchronously and could fail right here
           barStatus.textContent = `watched ✔ but cards failed: ${c.error} — tap again to retry`;
           watchedBtn.disabled = false;
           noCardsBtn.disabled = false;
           return;
         }
-        barStatus.textContent = pushCards
-          ? `watched ✔ · ${c?.pushed ?? 0} cards → ${c?.deck ?? "Anki"} · rate it?`
-          : "watched ✔ · no cards pushed · rate it?";
+        // the push runs server-side in the background — the queue row narrates
+        // it (`pushing` → `watched`) and carries any failure + retry
+        barStatus.textContent = !pushCards
+          ? "watched ✔ · no cards pushed · rate it?"
+          : c?.queued
+            ? `watched ✔ · pushing ${c.queued} cards in the background (see queue) · rate it?`
+            : `watched ✔ · ${c?.note ?? "no cards"} · rate it?`;
         deleteCachedPrep(episodeId); // phone-side cleanup: prep + video + marks
         clearTaps(episodeId);
         clearSubmitted(episodeId);

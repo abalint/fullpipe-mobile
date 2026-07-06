@@ -9,6 +9,7 @@ export type JobState =
   | "prepared"
   | "curating"
   | "staged"
+  | "pushing"
   | "watched"
   | "reconciled"
   | "failed";
@@ -19,10 +20,12 @@ export interface Job {
   title?: string;
   state: JobState;
   progress?: number; // 0..1 within the current state, if the worker reports it
+  progress_msg?: string | null; // live narration ("pushing card 3/12")
   rating?: number | null; // 1-5 stars from the ledger; null/absent = unrated
   tags?: string[]; // taste tags on the latest review (RATING_TAGS slugs)
   duration?: number | null; // runtime in seconds, once Stage 1 has artifacts
-  error?: string;
+  comprehensibility?: number | null; // coverage's token_comprehensibility, 0..1
+  error?: string | null;
   created_at?: string;
   updated_at?: string;
 }

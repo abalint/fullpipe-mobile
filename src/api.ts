@@ -64,11 +64,14 @@ export const api = {
     request<{ episode_id: string; rating: number | null; tags: string[] }>(
       `/episodes/${encodeURIComponent(id)}/rating`,
       { method: "POST", body: JSON.stringify({ rating, tags }) }),
-  // cards:false is the disliked-it branch — exposures still activate, deck stays clean
+  // cards:false is the disliked-it branch — exposures still activate, deck stays clean.
+  // The push itself runs server-side in the background: the response says how many
+  // cards were queued; progress/errors land on the queue row (`pushing` → `watched`)
   markWatched: (id: string, cards = true) =>
-    request<{ watched: boolean; cards?: { pushed: number; error?: string; deck?: string } }>(
-      `/watched/${encodeURIComponent(id)}`,
-      { method: "POST", body: JSON.stringify({ cards }) }),
+    request<{
+      watched: boolean;
+      cards?: { queued?: number; note?: string; pushed?: number; error?: string; deck?: string };
+    }>(`/watched/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ cards }) }),
   // media/artifact URLs carry the token as ?t= too: <video src> and
   // Filesystem.downloadFile can't always send headers (server media_auth
   // accepts either; tailnet-only traffic, so a query token is fine)

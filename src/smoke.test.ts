@@ -17,7 +17,8 @@ import {
   submitTaps,
 } from "./store";
 import { flushOutbox } from "./sync";
-import { hms, starBar } from "./views/queue";
+import { hms, sortJobs, starBar } from "./views/queue";
+import type { Job } from "./types";
 
 const doc = demo as unknown as PrepDoc;
 const ep = doc.episode.id;
@@ -170,5 +171,34 @@ describe("hms", () => {
     expect(hms(838.759)).toBe("00:13:59");
     expect(hms(3600 + 25 * 60 + 10)).toBe("01:25:10");
     expect(hms(10 * 3600)).toBe("10:00:00");
+  });
+});
+
+describe("sortJobs", () => {
+  const job = (episode_id: string, extra: Partial<Job>): Job =>
+    ({ episode_id, source: "s", state: "staged", ...extra }) as Job;
+  const jobs: Job[] = [
+    job("a", { created_at: "2026-07-01", comprehensibility: 0.5, duration: 600 }),
+    job("b", { created_at: "2026-07-03", comprehensibility: 0.9, duration: 60 }),
+    job("c", { created_at: "2026-07-02" }), // no coverage/duration staged yet
+  ];
+  const ids = (sorted: Job[]) => sorted.map((j) => j.episode_id);
+
+  it("orders by created_at both ways", () => {
+    expect(ids(sortJobs(jobs, "newest"))).toEqual(["b", "c", "a"]);
+    expect(ids(sortJobs(jobs, "oldest"))).toEqual(["a", "c", "b"]);
+  });
+
+  it("orders by metric and sinks rows missing it", () => {
+    expect(ids(sortJobs(jobs, "comp-desc"))).toEqual(["b", "a", "c"]);
+    expect(ids(sortJobs(jobs, "comp-asc"))).toEqual(["a", "b", "c"]);
+    expect(ids(sortJobs(jobs, "longest"))).toEqual(["a", "b", "c"]);
+    expect(ids(sortJobs(jobs, "shortest"))).toEqual(["b", "a", "c"]);
+  });
+
+  it("does not mutate the input", () => {
+    const before = ids(jobs);
+    sortJobs(jobs, "shortest");
+    expect(ids(jobs)).toEqual(before);
   });
 });
