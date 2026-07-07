@@ -41,7 +41,11 @@ window.addEventListener("hashchange", route);
 // first-run: no server configured → land on settings
 if (!getSettings().serverUrl && !location.hash) location.hash = "#/settings";
 route();
-installAutoFlush();
+// after a background flush lands, rebuild the queue so pending-sync chips and
+// stale snapshot states catch up with the server
+installAutoFlush(() => {
+  if (location.hash.startsWith("#/queue") || !location.hash) route();
+});
 
 // share-sheet → queue screen, which auto-enqueues the pending URL
 installShareTarget((url) => {

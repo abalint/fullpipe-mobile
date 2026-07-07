@@ -59,11 +59,12 @@ export const api = {
     request<{ applied: number; cards_selected?: number | null; duplicate: boolean }>(
       "/taps", { method: "POST", body: JSON.stringify(batch) }),
   // rating 1-5 (null clears) + optional taste tags — appended to the taste_events
-  // log server-side (re-POST appends a new review; the on-read verdict takes the latest)
-  rate: (id: string, rating: number | null, tags: string[] = []) =>
+  // log server-side (re-POST appends a new review; the on-read verdict takes the
+  // latest). review_id makes the POST replay-safe for outbox re-flushes.
+  rate: (id: string, rating: number | null, tags: string[] = [], reviewId?: string) =>
     request<{ episode_id: string; rating: number | null; tags: string[] }>(
       `/episodes/${encodeURIComponent(id)}/rating`,
-      { method: "POST", body: JSON.stringify({ rating, tags }) }),
+      { method: "POST", body: JSON.stringify({ rating, tags, review_id: reviewId }) }),
   // cards:false is the disliked-it branch — exposures still activate, deck stays clean.
   // The push itself runs server-side in the background: the response says how many
   // cards were queued; progress/errors land on the queue row (`pushing` → `watched`)

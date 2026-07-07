@@ -159,6 +159,9 @@ input {
 .chip.st-pushing { background: color-mix(in srgb, var(--accent) 25%, transparent);
   color: var(--accent); animation: chip-pulse 1.4s ease-in-out infinite; }
 @keyframes chip-pulse { 50% { opacity: .45; } }
+/* unsynced offline actions waiting in the outbox for this episode */
+.chip.pending { margin-left: 6px; background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent); border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
 
 /* partway-through-watching bar on a queue row (position is device-local) */
 .watchbar { height: 3px; border-radius: 2px; margin-top: 6px; overflow: hidden;

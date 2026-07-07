@@ -1,18 +1,21 @@
 // Prep screen: cache-first prep doc + tap capture + submit-to-outbox.
-// Submitting freezes taps into an idempotent batch, tries an immediate flush,
-// and marks the episode watched server-side via the /taps semantics.
+// Submitting freezes taps into an idempotent batch and tries an immediate
+// flush; mark-watched goes the same way when the server is unreachable — the
+// close-out happens locally now, the server catches up at the next sync.
 
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { renderPrep } from "../prep-render";
 import {
   cachePrep,
   clearSubmitted,
   clearTaps,
   deleteCachedPrep,
+  getCachedJobs,
   getCachedPrep,
   getSubmitted,
   getTaps,
   pendingTapCount,
+  queueWatched,
   submitTaps,
 } from "../store";
 import { deleteVideo, getVideoRecord, playVideo } from "../video";
@@ -93,13 +96,14 @@ export function prepView(episodeId: string): HTMLElement {
           episodeId,
           rating,
           tags,
-          (e) => (barStatus.textContent = `⚠ ${e.message}`),
           () => (engaged = true),
+          () => (barStatus.textContent = "rating queued — will sync when reachable"),
         ),
       );
     };
-    mountRating(null, []);
-    // prefill from the server if it already has a rating (offline: stays blank)
+    // prefill from the queue snapshot (works offline), then the live server
+    const snap = getCachedJobs()?.jobs.find((j) => j.episode_id === episodeId);
+    mountRating(snap?.rating ?? null, snap?.tags ?? []);
     void api
       .getJob(episodeId)
       .then((j) => {
@@ -151,6 +155,22 @@ export function prepView(episodeId: string): HTMLElement {
     // episode off the phone. "Mark watched" also pushes the selected cards to
     // Anki; "Watched · no cards" is the disliked-it branch: same close-out,
     // deck untouched (rate it so the dislike is on record).
+    // phone-side cleanup + the rate-while-fresh auto-return, shared by the
+    // online and queued-offline close-outs
+    const localCloseOut = async () => {
+      deleteCachedPrep(episodeId); // phone-side cleanup: prep + video + marks
+      clearTaps(episodeId);
+      clearSubmitted(episodeId);
+      await deleteVideo(episodeId);
+      // rate + tag while the impression is fresh; touching the rating cancels
+      // the auto-return so there's time to pick tags (else the queue row keeps
+      // the control). Reset here so only a *post-watch* touch counts.
+      engaged = false;
+      setTimeout(() => {
+        if (!engaged) location.hash = "#/queue";
+      }, 12000);
+    };
+
     const finishWatched = async (pushCards: boolean) => {
       watchedBtn.disabled = true;
       noCardsBtn.disabled = true;
@@ -171,18 +191,17 @@ export function prepView(episodeId: string): HTMLElement {
           : c?.queued
             ? `watched ✔ · pushing ${c.queued} cards in the background (see queue) · rate it?`
             : `watched ✔ · ${c?.note ?? "no cards"} · rate it?`;
-        deleteCachedPrep(episodeId); // phone-side cleanup: prep + video + marks
-        clearTaps(episodeId);
-        clearSubmitted(episodeId);
-        await deleteVideo(episodeId);
-        // rate + tag while the impression is fresh; touching the rating cancels
-        // the auto-return so there's time to pick tags (else the queue row keeps
-        // the control). Reset here so only a *post-watch* touch counts.
-        engaged = false;
-        setTimeout(() => {
-          if (!engaged) location.hash = "#/queue";
-        }, 12000);
+        await localCloseOut();
       } catch (e) {
+        // unreachable (no HTTP status) → the watch still counts: queue the
+        // close-out in the outbox (after any pending tap batches — FIFO) and
+        // clean up the phone now; the server catches up at the next sync
+        if (e instanceof ApiError && e.status === undefined) {
+          queueWatched(episodeId, pushCards);
+          barStatus.textContent = "watched ✔ queued offline — syncs when reachable · rate it?";
+          await localCloseOut();
+          return;
+        }
         barStatus.textContent = `⚠ ${(e as Error).message}`;
         watchedBtn.disabled = false;
         noCardsBtn.disabled = false;

@@ -8,11 +8,17 @@ import demo from "./demo-prep.json";
 import type { PrepDoc, TapBatch } from "./types";
 import { renderPrep } from "./prep-render";
 import {
+  actionEpisode,
   getOutbox,
   getSubmitted,
   getTaps,
+  pendingRating,
   pendingTapCount,
-  removeEpisodeBatches,
+  pendingWatched,
+  queueEnqueue,
+  queueRating,
+  queueWatched,
+  removeEpisodeActions,
   saveSettings,
   submitTaps,
 } from "./store";
@@ -95,13 +101,42 @@ describe("outbox", () => {
     root.remove();
   });
 
-  it("drops a deleted episode's batches but keeps others", () => {
+  it("drops a deleted episode's actions but keeps others", () => {
     submitTaps(ep);
+    queueWatched(ep, true);
     submitTaps("yt_other");
-    removeEpisodeBatches(ep);
+    removeEpisodeActions(ep);
     const left = getOutbox();
     expect(left.length).toBe(1);
-    expect(left[0].episode_id).toBe("yt_other");
+    expect(actionEpisode(left[0])).toBe("yt_other");
+  });
+
+  it("migrates a pre-typed outbox of bare TapBatch entries in place", () => {
+    const legacy: TapBatch = { episode_id: ep, batch_id: "abc123", taps: [["犬", "k"]] };
+    localStorage.setItem("fp.outbox", JSON.stringify([legacy]));
+    const out = getOutbox();
+    expect(out.length).toBe(1);
+    expect(out[0].kind).toBe("taps");
+    expect(out[0].id).toMatch(/^[0-9a-f]{16}$/);
+    expect(actionEpisode(out[0])).toBe(ep);
+    // persisted migrated, so the next read is already typed
+    expect(JSON.parse(localStorage.getItem("fp.outbox")!)[0].kind).toBe("taps");
+  });
+
+  it("keeps only the latest queued watched/rating per episode", () => {
+    queueWatched(ep, true);
+    queueWatched(ep, false); // changed their mind: no cards
+    queueRating(ep, 3, []);
+    queueRating(ep, 5, ["fascinating"]); // offline re-rate replaces, not appends
+    expect(getOutbox().length).toBe(2);
+    expect(pendingWatched(ep)).toEqual({ cards: false });
+    expect(pendingRating(ep)).toEqual({ rating: 5, tags: ["fascinating"] });
+  });
+
+  it("dedupes identical queued enqueues (POST /jobs is idempotent anyway)", () => {
+    queueEnqueue("https://youtu.be/x");
+    queueEnqueue("https://youtu.be/x");
+    expect(getOutbox().length).toBe(1);
   });
 
   it("empty submit still makes a batch (no corrections = default selection)", () => {
@@ -144,6 +179,62 @@ describe("outbox", () => {
     expect(bad.sent).toBe(0);
     expect(bad.remaining).toBe(1);
     expect(getOutbox().length).toBe(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("flushes mixed actions FIFO to their endpoints (taps before watched)", async () => {
+    saveSettings({ serverUrl: "http://pc.ts.net:8321", token: "tok" });
+    submitTaps(ep); // feedback first…
+    queueWatched(ep, true); // …then the close-out, as the user did them
+    queueRating(ep, 4, ["fascinating"]);
+    queueEnqueue("https://youtu.be/next1234567");
+
+    const calls: { path: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        calls.push({
+          path: new URL(String(url)).pathname,
+          body: JSON.parse((init.body as string) ?? "{}"),
+        });
+        return new Response("{}", { status: 200 });
+      }),
+    );
+    const res = await flushOutbox();
+    expect(res.sent).toBe(4);
+    expect(getOutbox().length).toBe(0);
+    expect(calls.map((c) => c.path)).toEqual([
+      "/taps",
+      `/watched/${ep}`,
+      `/episodes/${ep}/rating`,
+      "/jobs",
+    ]);
+    expect(calls[1].body).toEqual({ cards: true });
+    expect(calls[2].body.rating).toBe(4);
+    expect(calls[2].body.review_id).toMatch(/^[0-9a-f]{16}$/); // replay-safe
+    vi.unstubAllGlobals();
+  });
+
+  it("drops permanently rejected actions instead of poisoning the queue", async () => {
+    saveSettings({ serverUrl: "http://pc.ts.net:8321", token: "tok" });
+    queueWatched("yt_deleted", true); // episode gone server-side → 404
+    queueRating(ep, 4, []);
+
+    const paths: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        paths.push(new URL(String(url)).pathname);
+        return String(url).includes("yt_deleted")
+          ? new Response("no such episode", { status: 404 })
+          : new Response("{}", { status: 200 });
+      }),
+    );
+    const res = await flushOutbox();
+    expect(res.dropped).toBe(1);
+    expect(res.sent).toBe(1);
+    expect(getOutbox().length).toBe(0); // the 404 didn't block the rating behind it
+    expect(paths.length).toBe(2);
     vi.unstubAllGlobals();
   });
 });

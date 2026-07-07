@@ -49,11 +49,21 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Behavior notes
 
-- **Offline:** prep docs are cached on first view; the queue screen lists
-  cached docs when the server is unreachable. Taps accumulate per episode in
-  localStorage; **Submit** freezes them into a batch (client `batch_id` →
-  replay-idempotent) in the outbox, which flushes on submit / app-foreground /
-  network-return. "Copy blob" keeps the P9 copy-paste fallback.
+- **Offline:** downloaded episodes are fully usable without the server. The
+  `⬇` bundle is video + subs + transcript + definitions + the prep doc; prep
+  docs are also cached on first view and auto-cached for every staged episode
+  whenever the queue loads online. The queue screen itself falls back to the
+  last `GET /jobs` snapshot when unreachable, with server-only actions
+  (curate, delete, download, stream) hidden and everything local still live.
+  Every write is a typed action in the outbox — tap batches, mark-watched,
+  ratings, even enqueues — flushed FIFO on submit / app-foreground /
+  network-return, so an episode's feedback lands before its close-out. Each
+  kind is replay-safe (`batch_id` / client `review_id` dedup; watched/enqueue
+  idempotent); a permanently rejected action (episode deleted server-side) is
+  dropped rather than blocking the queue. Rows with unsynced actions carry a
+  `⇪ pending sync` chip, and a queued mark-watched shows as watched. Taps
+  accumulate per episode in localStorage; **Submit** freezes them into a batch.
+  "Copy blob" keeps the P9 copy-paste fallback.
 - **Submit with no taps** calls `POST /watched/{id}` instead.
 - **Rating + tags:** stars on watched/staged queue rows and the post-watch prep
   bar. Once a star is set, the six taste tags appear (grouped liked/didn't, all

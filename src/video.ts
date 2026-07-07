@@ -7,7 +7,7 @@
 import { registerPlugin } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { api } from "./api";
-import { getSettings } from "./store";
+import { cachePrep, getSettings } from "./store";
 import type { Definitions, TranscriptDoc } from "./types";
 
 interface ExternalPlayerPlugin {
@@ -140,6 +140,15 @@ export async function downloadVideo(
       defsPath = dPath;
     } catch {
       /* definitions are best-effort */
+    }
+    // prep article into the same offline bundle (localStorage cache — the prep
+    // view reads it there). At `prepared` this is the uncurated doc; the queue
+    // screen re-caches once curation lands (staged), and the prep view
+    // refreshes it on any online open.
+    try {
+      cachePrep(await api.getPrep(ep));
+    } catch {
+      /* prep is best-effort */
     }
     const stat = await Filesystem.stat({ path: vPath, directory: Directory.Data });
     const rec: VideoRecord = {

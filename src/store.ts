@@ -1,12 +1,15 @@
-// Device-local state: settings, per-episode tap marks, the tap outbox, and
-// the prep-doc cache. All in localStorage — persistent in the Capacitor
-// webview, and small (the video is the only big artifact; it never goes here).
+// Device-local state: settings, per-episode tap marks, the action outbox,
+// the prep-doc cache, and the last queue snapshot. All in localStorage —
+// persistent in the Capacitor webview, and small (the video is the only big
+// artifact; it never goes here).
 //
-// Outbox semantics (MOBILE.md "Sync semantics"): submitting taps freezes them
-// into a TapBatch with a client-generated batch_id, so a re-flush after a
-// reconnect replays idempotently — the server dedupes on batch_id.
+// Outbox semantics (MOBILE.md "Sync semantics"): every server write the app
+// can make offline — tap batches, mark-watched, ratings, enqueues — is a
+// typed action queued FIFO and flushed opportunistically. Each kind is
+// replay-safe server-side (batch_id / review_id dedup, idempotent
+// watched/enqueue), so a double-flush after a flaky connection is harmless.
 
-import type { PrepDoc, TapBatch, TapMark } from "./types";
+import type { Job, OutboxAction, PrepDoc, TapBatch, TapMark } from "./types";
 
 export interface Settings {
   serverUrl: string;
@@ -20,6 +23,7 @@ const K = {
   outbox: "fp.outbox",
   prep: (ep: string) => `fp.prep.${ep}`,
   prepIndex: "fp.prepIndex",
+  jobs: "fp.jobsCache",
 };
 
 function read<T>(key: string, fallback: T): T {
@@ -92,14 +96,31 @@ export function pendingTapCount(episodeId: string): number {
 
 // ---- outbox --------------------------------------------------------------------
 
-export function getOutbox(): TapBatch[] {
-  return read<TapBatch[]>(K.outbox, []);
-}
-
-function newBatchId(): string {
+function newId(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(8)))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/** The FIFO action queue. Pre-typed-outbox installs stored bare TapBatch[]
+    here — migrate those entries in place on first read. */
+export function getOutbox(): OutboxAction[] {
+  const raw = read<(OutboxAction | TapBatch)[]>(K.outbox, []);
+  if (!raw.some((a) => !("kind" in a))) return raw as OutboxAction[];
+  const migrated = raw.map((a) =>
+    "kind" in a ? a : ({ id: newId(), kind: "taps", batch: a } as OutboxAction),
+  );
+  write(K.outbox, migrated);
+  return migrated;
+}
+
+function pushAction(action: OutboxAction): void {
+  write(K.outbox, [...getOutbox(), action]);
+}
+
+/** The episode an action belongs to ("" for enqueues — no episode yet). */
+export function actionEpisode(a: OutboxAction): string {
+  return a.kind === "taps" ? a.batch.episode_id : a.kind === "enqueue" ? "" : a.episode_id;
 }
 
 /** Freeze the episode's current taps into the outbox. An empty batch is
@@ -107,8 +128,8 @@ function newBatchId(): string {
 export function submitTaps(episodeId: string): TapBatch {
   const taps = getTaps(episodeId);
   const entries = Object.entries(taps) as [string, TapMark][];
-  const batch: TapBatch = { episode_id: episodeId, batch_id: newBatchId(), taps: entries };
-  write(K.outbox, [...getOutbox(), batch]);
+  const batch: TapBatch = { episode_id: episodeId, batch_id: newId(), taps: entries };
+  pushAction({ id: newId(), kind: "taps", batch });
   // Snapshot the sent marks as the new baseline, but DON'T clear the live taps:
   // they stay as the display source of truth so reopening the doc shows what you
   // submitted (styled "committed") instead of a blank, un-marked article.
@@ -116,19 +137,94 @@ export function submitTaps(episodeId: string): TapBatch {
   return batch;
 }
 
-export function removeFromOutbox(batchId: string): void {
+/** Queue a mark-watched for later flush (server unreachable at watch time).
+    Replaces a pending one for the episode — the latest cards choice wins. */
+export function queueWatched(episodeId: string, cards: boolean): void {
   write(
     K.outbox,
-    getOutbox().filter((b) => b.batch_id !== batchId),
+    getOutbox().filter((a) => !(a.kind === "watched" && a.episode_id === episodeId)),
+  );
+  pushAction({ id: newId(), kind: "watched", episode_id: episodeId, cards });
+}
+
+/** Queue a rating review. Replaces a pending unsent review for the episode —
+    offline re-rates are UI fiddling, not taste drift; only the last one goes.
+    The client-minted review_id makes the eventual POST replay-safe. */
+export function queueRating(episodeId: string, rating: number | null, tags: string[]): void {
+  write(
+    K.outbox,
+    getOutbox().filter((a) => !(a.kind === "rating" && a.episode_id === episodeId)),
+  );
+  pushAction({ id: newId(), kind: "rating", episode_id: episodeId, rating, tags, review_id: newId() });
+}
+
+/** Queue a source for enqueueing (share-sheet/queue box while offline).
+    POST /jobs is idempotent by source, so duplicates are dropped here too. */
+export function queueEnqueue(source: string): void {
+  if (getOutbox().some((a) => a.kind === "enqueue" && a.source === source)) return;
+  pushAction({ id: newId(), kind: "enqueue", source });
+}
+
+export function removeFromOutbox(actionId: string): void {
+  write(
+    K.outbox,
+    getOutbox().filter((a) => a.id !== actionId),
   );
 }
 
-/** Drop an episode's pending batches — a deleted episode must not flush. */
-export function removeEpisodeBatches(episodeId: string): void {
+/** Drop an episode's pending actions — a deleted episode must not flush. */
+export function removeEpisodeActions(episodeId: string): void {
   write(
     K.outbox,
-    getOutbox().filter((b) => b.episode_id !== episodeId),
+    getOutbox().filter((a) => actionEpisode(a) !== episodeId),
   );
+}
+
+// ---- pending-action reads (what the UI overlays while unsynced) ----------------
+
+export function pendingWatched(episodeId: string): { cards: boolean } | null {
+  const a = getOutbox().find((x) => x.kind === "watched" && x.episode_id === episodeId);
+  return a && a.kind === "watched" ? { cards: a.cards } : null;
+}
+
+export function pendingRating(
+  episodeId: string,
+): { rating: number | null; tags: string[] } | null {
+  const a = getOutbox().find((x) => x.kind === "rating" && x.episode_id === episodeId);
+  return a && a.kind === "rating" ? { rating: a.rating, tags: a.tags } : null;
+}
+
+export function pendingEnqueues(): string[] {
+  return getOutbox().flatMap((a) => (a.kind === "enqueue" ? [a.source] : []));
+}
+
+export function hasPendingActions(episodeId: string): boolean {
+  return getOutbox().some((a) => actionEpisode(a) === episodeId);
+}
+
+/** Human summary for Settings: "2 tap batches · 1 watched · 1 rating". */
+export function outboxSummary(): string {
+  const counts = new Map<string, number>();
+  for (const a of getOutbox()) counts.set(a.kind, (counts.get(a.kind) ?? 0) + 1);
+  const label: Record<string, [string, string]> = {
+    taps: ["tap batch", "tap batches"],
+    watched: ["watched", "watched"],
+    rating: ["rating", "ratings"],
+    enqueue: ["enqueue", "enqueues"],
+  };
+  return [...counts]
+    .map(([k, n]) => `${n} ${label[k][n > 1 ? 1 : 0]}`)
+    .join(" · ");
+}
+
+// ---- queue snapshot (offline queue screen) --------------------------------------
+
+export function cacheJobs(jobs: Job[]): void {
+  write(K.jobs, { at: new Date().toISOString(), jobs });
+}
+
+export function getCachedJobs(): { at: string; jobs: Job[] } | null {
+  return read<{ at: string; jobs: Job[] } | null>(K.jobs, null);
 }
 
 // ---- prep-doc cache -------------------------------------------------------------

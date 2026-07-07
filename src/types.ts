@@ -122,3 +122,19 @@ export interface TapBatch {
   batch_id: string;
   taps: [string, TapMark][];
 }
+
+/** One queued offline action. The outbox is FIFO (an episode's taps flush
+    before its watched), and every kind is replay-safe server-side: taps
+    dedupe on batch_id, ratings on review_id, watched/enqueue are idempotent. */
+export type OutboxAction =
+  | { id: string; kind: "taps"; batch: TapBatch }
+  | { id: string; kind: "watched"; episode_id: string; cards: boolean }
+  | {
+      id: string;
+      kind: "rating";
+      episode_id: string;
+      rating: number | null;
+      tags: string[];
+      review_id: string;
+    }
+  | { id: string; kind: "enqueue"; source: string };

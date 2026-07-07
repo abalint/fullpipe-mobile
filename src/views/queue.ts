@@ -1,16 +1,28 @@
 // Queue screen: enqueue box, live job list from the server, and — when the
-// server is unreachable — the offline list of cached prep docs so watch-time
-// never depends on connectivity.
+// server is unreachable — the same list rebuilt from the last cached snapshot,
+// with the offline-capable actions (play the downloaded video, open the cached
+// prep, rate, mark watched) still live and server-only ones hidden. Pending
+// outbox actions overlay the rows so a queued mark-watched reads as watched.
 
 import { api, ApiError } from "../api";
 import {
   cachedPrepIds,
+  cacheJobs,
+  cachePrep,
   clearSubmitted,
   clearTaps,
   deleteCachedPrep,
+  getCachedJobs,
   getCachedPrep,
-  removeEpisodeBatches,
+  hasPendingActions,
+  pendingEnqueues,
+  pendingRating,
+  pendingWatched,
+  queueEnqueue,
+  queueRating,
+  removeEpisodeActions,
 } from "../store";
+import { flushOutbox } from "../sync";
 import { deleteVideo, downloadVideo, getPosition, getVideoRecord, playVideo } from "../video";
 import type { Job, JobState } from "../types";
 
@@ -191,20 +203,25 @@ const TAG_GROUPS: { key: string; label: string; tags: [string, string][] }[] = [
 
 /** Stars + the optional tag picker as one self-contained control. Star sets
     the rating (re-tap clears, which also clears tags); once rated, the six tag
-    buttons appear (multi-select). Writes are debounced and append a review to
-    the taste log — re-rating never overwrites; the on-read verdict takes the
-    latest. `onInteract` fires synchronously on any tap (lets the prep view
-    cancel its post-watch auto-return). */
+    buttons appear (multi-select). Writes are debounced, go through the outbox
+    (offline they just wait; the client review_id keeps replays idempotent),
+    and append a review to the taste log — re-rating never overwrites; the
+    on-read verdict takes the latest. A pending unsynced review overrides the
+    initial values so an offline re-open shows what you actually picked.
+    `onInteract` fires synchronously on any tap (lets the prep view cancel its
+    post-watch auto-return); `onQueued` fires when the review couldn't reach
+    the server and is waiting in the outbox. */
 export function ratingBlock(
   episodeId: string,
   initialRating: number | null | undefined,
   initialTags: string[],
-  onError: (e: Error) => void,
   onInteract?: () => void,
+  onQueued?: () => void,
 ): HTMLElement {
   const wrap = el("div", "rating");
-  let rating: number | null = initialRating ?? null;
-  const tags = new Set<string>(initialTags);
+  const pending = pendingRating(episodeId);
+  let rating: number | null = pending ? pending.rating : (initialRating ?? null);
+  const tags = new Set<string>(pending ? pending.tags : initialTags);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const send = () => {
@@ -212,7 +229,10 @@ export function ratingBlock(
     const r = rating;
     const t = [...tags];
     timer = setTimeout(() => {
-      void api.rate(episodeId, r, t).catch((e) => onError(e as Error));
+      queueRating(episodeId, r, t);
+      void flushOutbox().then((res) => {
+        if (res.error && pendingRating(episodeId)) onQueued?.();
+      });
     }, 450); // coalesce rapid taps into a single review batch
   };
 
@@ -262,13 +282,22 @@ export function ratingBlock(
   return wrap;
 }
 
-function jobRow(job: Job, rerender: () => void, onRatingTouch?: () => void): HTMLElement {
+function jobRow(
+  job: Job,
+  rerender: () => void,
+  onRatingTouch?: () => void,
+  offline = false,
+): HTMLElement {
   const row = el("div", "job");
   const main = el("div", "job-main");
   main.appendChild(el("div", "job-title", job.title || job.source || job.episode_id));
   const sub = el("div", "job-sub");
-  const chip = el("span", `chip st-${job.state}`, job.state);
+  // a queued-offline mark-watched overlays the (stale) snapshot state — the
+  // row reads as done, with the pending chip saying the server doesn't know yet
+  const state = pendingWatched(job.episode_id) && job.state !== "watched" ? "watched" : job.state;
+  const chip = el("span", `chip st-${state}`, state);
   sub.appendChild(chip);
+  if (hasPendingActions(job.episode_id)) sub.appendChild(el("span", "chip pending", "⇪ pending sync"));
   if (job.duration) sub.appendChild(el("span", "muted", ` ${fmtDur(job.duration)}`));
   if (job.comprehensibility != null)
     sub.appendChild(el("span", "muted", ` · ${Math.round(job.comprehensibility * 100)}% comp`));
@@ -295,18 +324,16 @@ function jobRow(job: Job, rerender: () => void, onRatingTouch?: () => void): HTM
   // ratable once curation has written the episode to the ledger — including
   // before watched, so a dud can be rated and swiped away without ever
   // pushing its cards
-  if (RATABLE.includes(job.state)) {
+  if (RATABLE.includes(state)) {
     // ratingBlock keeps its own state (star + tags) so tapping never triggers a
     // full list reload that would collapse the picker mid-selection.
-    main.appendChild(
-      ratingBlock(job.episode_id, job.rating, job.tags ?? [], (e) => alert(e.message), onRatingTouch),
-    );
+    main.appendChild(ratingBlock(job.episode_id, job.rating, job.tags ?? [], onRatingTouch));
   }
   row.appendChild(main);
 
   const actions = el("div", "job-actions");
   // the background card push failed — same retry the prep screen offers
-  if (job.state === "watched" && job.error) {
+  if (!offline && job.state === "watched" && job.error) {
     const retry = el("button", "small", "retry cards") as HTMLButtonElement;
     retry.addEventListener("click", async () => {
       retry.disabled = true;
@@ -319,7 +346,7 @@ function jobRow(job: Job, rerender: () => void, onRatingTouch?: () => void): HTM
     });
     actions.appendChild(retry);
   }
-  if (job.state === "prepared") {
+  if (!offline && job.state === "prepared") {
     const b = el("button", "small", "curate") as HTMLButtonElement;
     b.addEventListener("click", async () => {
       b.disabled = true;
@@ -332,7 +359,10 @@ function jobRow(job: Job, rerender: () => void, onRatingTouch?: () => void): HTM
     });
     actions.appendChild(b);
   }
-  if (["staged", "reconciled", "pushing", "watched"].includes(job.state)) {
+  if (
+    ["staged", "reconciled", "pushing", "watched"].includes(job.state) &&
+    (!offline || getCachedPrep(job.episode_id))
+  ) {
     const open = el("a", "small btn", "prep") as HTMLAnchorElement;
     open.href = `#/prep/${encodeURIComponent(job.episode_id)}`;
     actions.appendChild(open);
@@ -349,7 +379,7 @@ function jobRow(job: Job, rerender: () => void, onRatingTouch?: () => void): HTM
         void playVideo(ep, job.title).catch((e) => alert((e as Error).message));
       });
       actions.appendChild(vlc);
-    } else {
+    } else if (!offline) {
       const dl = el("button", "small", "⬇ video") as HTMLButtonElement;
       dl.addEventListener("click", async () => {
         dl.disabled = true;
@@ -398,7 +428,11 @@ function deleteMessage(job: Job): string {
 /** Delete everywhere: server first (artifacts + queue row + unwatched-ledger
     unwind happen there), then every local trace. Server failure keeps local
     state intact so the row stays visible for retry. */
-async function removeJob(job: Job, reload: () => void): Promise<void> {
+async function removeJob(job: Job, reload: () => void, offline = false): Promise<void> {
+  if (offline) {
+    alert("Offline — deleting removes server artifacts, so it needs the server reachable.");
+    return;
+  }
   if (job.state === "pushing") {
     alert("Cards are being pushed to Anki for this episode — wait for it to finish, then delete.");
     return;
@@ -419,7 +453,7 @@ async function removeJob(job: Job, reload: () => void): Promise<void> {
   deleteCachedPrep(ep);
   clearTaps(ep);
   clearSubmitted(ep);
-  removeEpisodeBatches(ep);
+  removeEpisodeActions(ep);
   reload();
 }
 
@@ -444,7 +478,15 @@ export function queueView(): HTMLElement {
       input.value = "";
       await load();
     } catch (err) {
-      alert((err as Error).message);
+      // unreachable (no HTTP status) → park it in the outbox; POST /jobs is
+      // idempotent by source so the eventual flush is safe
+      if (err instanceof ApiError && err.status === undefined) {
+        queueEnqueue(source);
+        input.value = "";
+        render();
+      } else {
+        alert((err as Error).message);
+      }
     } finally {
       add.disabled = false;
     }
@@ -459,6 +501,7 @@ export function queueView(): HTMLElement {
   const backlog = el("span", "backlog");
 
   let jobs: Job[] = [];
+  let offline = false;
   let pollTimer: number | undefined;
   let lastRatingTouch = 0;
 
@@ -476,7 +519,7 @@ export function queueView(): HTMLElement {
   });
 
   function render(): void {
-    status.textContent = jobs.length ? "" : "queue is empty";
+    if (!offline) status.textContent = jobs.length ? "" : "queue is empty";
     list.textContent = "";
     const total = jobs
       .filter((j) => STAGED_UNWATCHED.includes(j.state))
@@ -484,19 +527,69 @@ export function queueView(): HTMLElement {
     backlog.textContent = total > 0 ? hms(total) : "";
     const rerender = () => void load();
     const onRatingTouch = () => (lastRatingTouch = Date.now());
+    // sources queued while unreachable, waiting in the outbox
+    for (const source of pendingEnqueues()) {
+      const row = el("div", "job");
+      const main = el("div", "job-main");
+      main.appendChild(el("div", "job-title", source));
+      const sub = el("div", "job-sub");
+      sub.appendChild(el("span", "chip pending", "⇪ will queue on sync"));
+      main.appendChild(sub);
+      row.appendChild(main);
+      list.appendChild(row);
+    }
     for (const j of sortJobs(jobs, sortSel.value as QueueSort))
       list.appendChild(
-        swipeable(jobRow(j, rerender, onRatingTouch), () => void removeJob(j, rerender)),
+        swipeable(jobRow(j, rerender, onRatingTouch, offline), () =>
+          void removeJob(j, rerender, offline),
+        ),
       );
+    // cached prep docs with no queue row (snapshot predates them / demo doc)
+    // stay reachable offline
+    if (offline) {
+      const known = new Set(jobs.map((j) => j.episode_id));
+      const orphans = cachedPrepIds().filter((id) => !known.has(id));
+      if (orphans.length) {
+        list.appendChild(el("h2", "", "Cached prep docs"));
+        for (const id of orphans) {
+          const row = el("div", "job");
+          const a = el("a", "job-title", getCachedPrep(id)?.episode.title || id) as HTMLAnchorElement;
+          a.href = `#/prep/${encodeURIComponent(id)}`;
+          row.appendChild(a);
+          list.appendChild(row);
+        }
+      }
+    }
+  }
+
+  /** Pull prep docs for every curated episode in the background so "staged
+      while online" implies "prep readable offline" — not only after a manual
+      open. Skips docs that already carry their curation; refetches ones
+      cached back at `prepared` (pre-curation). */
+  async function cacheStagedPreps(): Promise<boolean> {
+    let fetched = false;
+    for (const j of jobs) {
+      if (!STAGED_UNWATCHED.includes(j.state)) continue;
+      const cached = getCachedPrep(j.episode_id);
+      if (cached?.curate) continue;
+      try {
+        cachePrep(await api.getPrep(j.episode_id));
+        fetched = true;
+      } catch {
+        /* best-effort — next queue load retries */
+      }
+    }
+    return fetched;
   }
 
   /** While the server is actively working (Stage 1, card push), refresh the
       list every few seconds so progress narrates itself — but never rebuild
       it under an in-progress star/tag selection. Stops when the view is
-      swapped out or nothing is active. */
+      swapped out, nothing is active, or the server is unreachable (a cached
+      snapshot can hold "active" states that aren't advancing). */
   function schedulePoll(): void {
     if (pollTimer) clearTimeout(pollTimer);
-    if (!jobs.some((j) => ACTIVE.includes(j.state))) return;
+    if (offline || !jobs.some((j) => ACTIVE.includes(j.state))) return;
     pollTimer = window.setTimeout(() => {
       if (!root.isConnected) return;
       if (Date.now() - lastRatingTouch < 15000) return schedulePoll();
@@ -508,26 +601,24 @@ export function queueView(): HTMLElement {
     if (!silent) status.textContent = "loading…";
     try {
       jobs = await api.listJobs();
+      offline = false;
+      cacheJobs(jobs); // snapshot for the offline queue screen
       render();
+      void cacheStagedPreps().then((fetched) => {
+        if (fetched && root.isConnected && !offline) render(); // prep buttons may appear
+      });
     } catch (e) {
-      jobs = [];
-      list.textContent = "";
-      backlog.textContent = "";
+      // offline fallback: rebuild the queue from the last snapshot — cached
+      // preps, downloaded videos, rating and mark-watched all still work (the
+      // writes wait in the outbox)
+      offline = true;
+      const snap = getCachedJobs();
+      jobs = snap?.jobs ?? [];
       const msg = e instanceof ApiError ? e.message : String(e);
-      status.textContent = `⚠ offline — ${msg}`;
-      // offline fallback: anything already cached is still fully usable
-      const ids = cachedPrepIds();
-      if (ids.length) {
-        list.appendChild(el("h2", "", "Cached prep docs"));
-        ids.forEach((id) => {
-          const doc = getCachedPrep(id);
-          const row = el("div", "job");
-          const a = el("a", "job-title", doc?.episode.title || id) as HTMLAnchorElement;
-          a.href = `#/prep/${encodeURIComponent(id)}`;
-          row.appendChild(a);
-          list.appendChild(row);
-        });
-      }
+      status.textContent = snap
+        ? `⚠ offline — cached queue from ${new Date(snap.at).toLocaleString()}`
+        : `⚠ offline — ${msg}`;
+      render();
     }
     schedulePoll();
   }

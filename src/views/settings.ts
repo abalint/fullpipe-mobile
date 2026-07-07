@@ -10,6 +10,7 @@ import {
   getCachedPrep,
   getOutbox,
   getSettings,
+  outboxSummary,
   saveSettings,
 } from "../store";
 import { flushOutbox } from "../sync";
@@ -86,13 +87,15 @@ export function settingsView(): HTMLElement {
   const renderOutbox = () => {
     const n = getOutbox().length;
     outboxStatus.textContent = n
-      ? `${n} tap batch${n > 1 ? "es" : ""} waiting to sync`
+      ? `${n} action${n > 1 ? "s" : ""} waiting to sync: ${outboxSummary()}`
       : "empty — everything synced";
     flush.disabled = !n;
   };
   flush.addEventListener("click", async () => {
     const res = await flushOutbox();
     renderOutbox();
+    if (res.dropped)
+      outboxStatus.textContent += ` (${res.dropped} stale action${res.dropped > 1 ? "s" : ""} dropped)`;
     if (res.error) outboxStatus.textContent += ` (⚠ ${res.error})`;
   });
   renderOutbox();
