@@ -2,7 +2,8 @@
 // trigger for now, WorkManager later). Files land in app-internal storage
 // (videos/<episode>.mp4 + .srt sidecar) and are handed to an external player
 // (VLC) as content:// grants via the ExternalPlayer plugin. Deleted at
-// mark-watched.
+// mark-watched — unless the episode is shelved for passive listening ("keep to
+// listen"), which pins the file so its audio plays straight off the device.
 
 import { registerPlugin } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";

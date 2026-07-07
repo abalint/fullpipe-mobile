@@ -19,6 +19,7 @@ export interface Job {
   source: string;
   title?: string;
   state: JobState;
+  passive?: boolean; // shelved into the passive-listening collection
   progress?: number; // 0..1 within the current state, if the worker reports it
   progress_msg?: string | null; // live narration ("pushing card 3/12")
   rating?: number | null; // 1-5 stars from the ledger; null/absent = unrated
@@ -138,4 +139,5 @@ export type OutboxAction =
       tags: string[];
       review_id: string;
     }
-  | { id: string; kind: "enqueue"; source: string };
+  | { id: string; kind: "enqueue"; source: string }
+  | { id: string; kind: "passive"; episode_id: string; passive: boolean };

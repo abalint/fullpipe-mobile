@@ -16,6 +16,7 @@ import {
   getCachedPrep,
   hasPendingActions,
   pendingEnqueues,
+  pendingPassive,
   pendingRating,
   pendingWatched,
   queueEnqueue,
@@ -38,6 +39,13 @@ const ACTIVE: JobState[] = ["queued", ...STAGE1, "pushing"];
 // close-out runs right when the impression is freshest)
 const RATABLE: JobState[] = ["staged", "reconciled", "pushing", "watched"];
 
+/** Whether a job belongs on the Listen tab — the server flag, overlaid with a
+    still-unsynced offline shelve/un-shelve so the row moves the moment you tap. */
+export function isPassive(job: Job): boolean {
+  const pending = pendingPassive(job.episode_id);
+  return pending ?? !!job.passive;
+}
+
 /** Seconds → hh:mm:ss for the unwatched-backlog readout. */
 export function hms(seconds: number): string {
   const s = Math.round(seconds);
@@ -46,7 +54,7 @@ export function hms(seconds: number): string {
 }
 
 /** Seconds → compact "1h12m" / "38m" for a queue row. */
-function fmtDur(seconds: number): string {
+export function fmtDur(seconds: number): string {
   const m = Math.round(seconds / 60);
   if (m < 1) return "<1m";
   return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m` : `${m}m`;
@@ -98,7 +106,7 @@ function el(tag: string, cls?: string, text?: string): HTMLElement {
 /** Standard swipe-to-delete: drag the row left to reveal a delete button
     underneath on the right; release past half-open snaps it open. Vertical
     movement wins early so list scrolling is never hijacked. */
-function swipeable(content: HTMLElement, onDelete: () => void): HTMLElement {
+export function swipeable(content: HTMLElement, onDelete: () => void): HTMLElement {
   const wrap = el("div", "swipe");
   const del = el("button", "swipe-del", "delete") as HTMLButtonElement;
   del.addEventListener("click", onDelete);
@@ -332,6 +340,21 @@ function jobRow(
   row.appendChild(main);
 
   const actions = el("div", "job-actions");
+  // watched → offer to shelve it into the passive-listening collection
+  // (Listen tab); the row leaves this list but keeps all its artifacts
+  if (!offline && job.state === "watched") {
+    const shelve = el("button", "small", "🎧 passive") as HTMLButtonElement;
+    shelve.addEventListener("click", async () => {
+      shelve.disabled = true;
+      try {
+        await api.setPassive(job.episode_id, true);
+      } catch (e) {
+        alert((e as Error).message);
+      }
+      rerender();
+    });
+    actions.appendChild(shelve);
+  }
   // the background card push failed — same retry the prep screen offers
   if (!offline && job.state === "watched" && job.error) {
     const retry = el("button", "small", "retry cards") as HTMLButtonElement;
@@ -428,7 +451,7 @@ function deleteMessage(job: Job): string {
 /** Delete everywhere: server first (artifacts + queue row + unwatched-ledger
     unwind happen there), then every local trace. Server failure keeps local
     state intact so the row stays visible for retry. */
-async function removeJob(job: Job, reload: () => void, offline = false): Promise<void> {
+export async function removeJob(job: Job, reload: () => void, offline = false): Promise<void> {
   if (offline) {
     alert("Offline — deleting removes server artifacts, so it needs the server reachable.");
     return;
@@ -519,7 +542,7 @@ export function queueView(): HTMLElement {
   });
 
   function render(): void {
-    if (!offline) status.textContent = jobs.length ? "" : "queue is empty";
+    if (!offline) status.textContent = jobs.some((j) => !isPassive(j)) ? "" : "queue is empty";
     list.textContent = "";
     const total = jobs
       .filter((j) => STAGED_UNWATCHED.includes(j.state))
@@ -538,7 +561,8 @@ export function queueView(): HTMLElement {
       row.appendChild(main);
       list.appendChild(row);
     }
-    for (const j of sortJobs(jobs, sortSel.value as QueueSort))
+    // passive-shelved episodes live on the Listen tab, not here
+    for (const j of sortJobs(jobs.filter((j) => !isPassive(j)), sortSel.value as QueueSort))
       list.appendChild(
         swipeable(jobRow(j, rerender, onRatingTouch, offline), () =>
           void removeJob(j, rerender, offline),

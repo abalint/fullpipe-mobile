@@ -32,6 +32,12 @@
 
         </activity>
 
+        <!-- passive-listening playlist: keeps playing with the screen off -->
+        <service
+            android:name=".PassiveAudioService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -46,4 +52,9 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- passive-listening foreground media service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 </manifest>

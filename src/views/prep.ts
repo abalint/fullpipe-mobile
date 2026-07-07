@@ -15,6 +15,7 @@ import {
   getSubmitted,
   getTaps,
   pendingTapCount,
+  queuePassive,
   queueWatched,
   submitTaps,
 } from "../store";
@@ -63,6 +64,7 @@ export function prepView(episodeId: string): HTMLElement {
     const bar = el("div", "submit-bar");
     const submit = el("button", "primary", "Submit feedback") as HTMLButtonElement;
     const watchedBtn = el("button", "", "Mark watched") as HTMLButtonElement;
+    const listenBtn = el("button", "", "🎧 Watched + listen") as HTMLButtonElement;
     const noCardsBtn = el("button", "", "Watched · no cards") as HTMLButtonElement;
     const copyBtn = el("button", "", "Copy blob") as HTMLButtonElement;
     const barStatus = el("span", "muted");
@@ -78,7 +80,7 @@ export function prepView(episodeId: string): HTMLElement {
       });
       bar.append(vlc);
     }
-    bar.append(submit, watchedBtn, noCardsBtn, copyBtn, barStatus);
+    bar.append(submit, watchedBtn, listenBtn, noCardsBtn, copyBtn, barStatus);
 
     // Rating is available the whole time, not just after Mark watched — rate
     // a dud early, then either "Watched · no cards" (exposures still count)
@@ -156,12 +158,14 @@ export function prepView(episodeId: string): HTMLElement {
     // Anki; "Watched · no cards" is the disliked-it branch: same close-out,
     // deck untouched (rate it so the dislike is on record).
     // phone-side cleanup + the rate-while-fresh auto-return, shared by the
-    // online and queued-offline close-outs
-    const localCloseOut = async () => {
+    // online and queued-offline close-outs. `keepVideo` is the passive branch:
+    // the episode is headed to the Listen tab, so the downloaded mp4 stays put
+    // and its audio plays straight off the device — no re-download.
+    const localCloseOut = async (keepVideo = false) => {
       deleteCachedPrep(episodeId); // phone-side cleanup: prep + video + marks
       clearTaps(episodeId);
       clearSubmitted(episodeId);
-      await deleteVideo(episodeId);
+      if (!keepVideo) await deleteVideo(episodeId);
       // rate + tag while the impression is fresh; touching the rating cancels
       // the auto-return so there's time to pick tags (else the queue row keeps
       // the control). Reset here so only a *post-watch* touch counts.
@@ -171,43 +175,59 @@ export function prepView(episodeId: string): HTMLElement {
       }, 12000);
     };
 
-    const finishWatched = async (pushCards: boolean) => {
+    // `passive` = the "keep to listen" branch: cards are pushed like a normal
+    // watched, the episode is shelved onto the Listen tab, and the downloaded
+    // video is retained so its audio plays off the device with no re-download.
+    const finishWatched = async (pushCards: boolean, passive = false) => {
       watchedBtn.disabled = true;
+      listenBtn.disabled = true;
       noCardsBtn.disabled = true;
+      const reenable = () => {
+        watchedBtn.disabled = false;
+        listenBtn.disabled = false;
+        noCardsBtn.disabled = false;
+      };
       try {
         const res = await api.markWatched(episodeId, pushCards);
         const c = res.cards;
         if (c?.error) {
           // pre-async servers pushed synchronously and could fail right here
           barStatus.textContent = `watched ✔ but cards failed: ${c.error} — tap again to retry`;
-          watchedBtn.disabled = false;
-          noCardsBtn.disabled = false;
+          reenable();
           return;
         }
+        // shelve onto the Listen tab once the watch has landed (the /passive
+        // route only accepts a watched episode). Best-effort: a failure here
+        // leaves a normal watched row the user can still shelve from the queue.
+        if (passive) await api.setPassive(episodeId, true).catch(() => {});
         // the push runs server-side in the background — the queue row narrates
         // it (`pushing` → `watched`) and carries any failure + retry
-        barStatus.textContent = !pushCards
-          ? "watched ✔ · no cards pushed · rate it?"
+        const base = !pushCards
+          ? "watched ✔ · no cards pushed"
           : c?.queued
-            ? `watched ✔ · pushing ${c.queued} cards in the background (see queue) · rate it?`
-            : `watched ✔ · ${c?.note ?? "no cards"} · rate it?`;
-        await localCloseOut();
+            ? `watched ✔ · pushing ${c.queued} cards in the background (see queue)`
+            : `watched ✔ · ${c?.note ?? "no cards"}`;
+        barStatus.textContent = passive ? `${base} · 🎧 on Listen · rate it?` : `${base} · rate it?`;
+        await localCloseOut(passive);
       } catch (e) {
         // unreachable (no HTTP status) → the watch still counts: queue the
         // close-out in the outbox (after any pending tap batches — FIFO) and
         // clean up the phone now; the server catches up at the next sync
         if (e instanceof ApiError && e.status === undefined) {
           queueWatched(episodeId, pushCards);
-          barStatus.textContent = "watched ✔ queued offline — syncs when reachable · rate it?";
-          await localCloseOut();
+          if (passive) queuePassive(episodeId, true); // after watched — FIFO
+          barStatus.textContent = passive
+            ? "watched ✔ · 🎧 on Listen · queued offline — syncs when reachable · rate it?"
+            : "watched ✔ queued offline — syncs when reachable · rate it?";
+          await localCloseOut(passive);
           return;
         }
         barStatus.textContent = `⚠ ${(e as Error).message}`;
-        watchedBtn.disabled = false;
-        noCardsBtn.disabled = false;
+        reenable();
       }
     };
     watchedBtn.addEventListener("click", () => void finishWatched(true));
+    listenBtn.addEventListener("click", () => void finishWatched(true, true));
     noCardsBtn.addEventListener("click", () => void finishWatched(false));
 
     // P9 offline fallback: the copy-paste corrections blob still works.

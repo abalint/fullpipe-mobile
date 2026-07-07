@@ -158,6 +158,18 @@ export function queueRating(episodeId: string, rating: number | null, tags: stri
   pushAction({ id: newId(), kind: "rating", episode_id: episodeId, rating, tags, review_id: newId() });
 }
 
+/** Queue a passive shelve/un-shelve for later flush (server unreachable at
+    watch time). Replaces a pending one for the episode — the latest flag wins.
+    Enqueued after the watched action so FIFO lands it once the server has moved
+    the row to `watched` (the /passive route 409s otherwise). */
+export function queuePassive(episodeId: string, passive: boolean): void {
+  write(
+    K.outbox,
+    getOutbox().filter((a) => !(a.kind === "passive" && a.episode_id === episodeId)),
+  );
+  pushAction({ id: newId(), kind: "passive", episode_id: episodeId, passive });
+}
+
 /** Queue a source for enqueueing (share-sheet/queue box while offline).
     POST /jobs is idempotent by source, so duplicates are dropped here too. */
 export function queueEnqueue(source: string): void {
@@ -187,6 +199,11 @@ export function pendingWatched(episodeId: string): { cards: boolean } | null {
   return a && a.kind === "watched" ? { cards: a.cards } : null;
 }
 
+export function pendingPassive(episodeId: string): boolean | null {
+  const a = getOutbox().find((x) => x.kind === "passive" && x.episode_id === episodeId);
+  return a && a.kind === "passive" ? a.passive : null;
+}
+
 export function pendingRating(
   episodeId: string,
 ): { rating: number | null; tags: string[] } | null {
@@ -211,6 +228,7 @@ export function outboxSummary(): string {
     watched: ["watched", "watched"],
     rating: ["rating", "ratings"],
     enqueue: ["enqueue", "enqueues"],
+    passive: ["shelve", "shelves"],
   };
   return [...counts]
     .map(([k, n]) => `${n} ${label[k][n > 1 ? 1 : 0]}`)

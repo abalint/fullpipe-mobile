@@ -1,8 +1,9 @@
-// App shell: hash router + bottom nav. Three tabs (queue / prep / settings);
-// prep and player routes carry an episode id.
+// App shell: hash router + bottom nav. Four tabs (queue / listen / prep /
+// settings); prep and player routes carry an episode id.
 
 import "./style.css";
 import { queueView } from "./views/queue";
+import { passiveView } from "./views/passive";
 import { prepView } from "./views/prep";
 import { playerView } from "./views/player";
 import { settingsView } from "./views/settings";
@@ -22,6 +23,7 @@ function route(): void {
   if (view === "prep" && arg) node = prepView(arg);
   else if (view === "player" && arg)
     node = playerView(arg, arg2 !== undefined && arg2 !== "" ? Number(arg2) : undefined);
+  else if (view === "listen") node = passiveView();
   else if (view === "settings") node = settingsView();
   else if (view === "prep") {
     // bare prep tab → most recently cached doc, else nudge to queue

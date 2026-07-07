@@ -51,6 +51,11 @@ export const api = {
     request<Job>("/jobs", { method: "POST", body: JSON.stringify({ source }) }),
   curate: (id: string) =>
     request<Job>(`/jobs/${encodeURIComponent(id)}/curate`, { method: "POST" }),
+  // shelve a watched episode into the passive-listening collection (or pull
+  // it back out) — server-side flag only, artifacts stay put
+  setPassive: (id: string, passive: boolean) =>
+    request<Job>(`/jobs/${encodeURIComponent(id)}/passive`,
+      { method: "POST", body: JSON.stringify({ passive }) }),
   deleteJob: (id: string) =>
     request<{ deleted: string; files_removed: number }>(
       `/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }),
