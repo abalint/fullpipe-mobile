@@ -3,7 +3,13 @@
 // server. Subtitles are a custom overlay driven by the tokenized transcript —
 // the same token markup + tap store as the prep doc, so marking a word here
 // is the same act as marking it there — with a plain-SRT fallback when no
-// transcript is available. Prep-doc keywords glow orange in the subs; tapping
+// transcript is available. Long sentences roll up broadcast-style: the cue is
+// chunked into lines that fit the overlay width and shown through a 2-line
+// window — current line at the bottom, previous line dimmed above it. Lines
+// advance on real aligned token times (Token.t: ASR words/segments, or cue
+// spans for hand-sub episodes); tokens without times (episodes staged before
+// alignment existed) fall back to each line's width-proportional share of
+// the cue's speech span. Prep-doc keywords glow orange in the subs; tapping
 // one pops its gloss + curate notes. Subtitle modes: on / keyword-only (subs
 // stay hidden unless the line carries a keyword or a ★-marked word) / off.
 // Word highlighting is text-color-only (no backgrounds over video) and
@@ -33,6 +39,9 @@ import type { Definitions, GlossEntry, PrepDoc, Segs, TapMark, Token } from "../
 export interface Cue {
   start: number;
   end: number;
+  /** The ASR end time, before extendCues() lingers `end` — roll-up pacing
+      spreads the lines over start→speechEnd so text tracks the speech. */
+  speechEnd?: number;
   cls?: string; // coverage classification (i_plus_1/…) — absent on old sidecars
   tokens?: Token[];
   text?: string;
@@ -97,8 +106,107 @@ export function extendCues(cues: Cue[], maxLinger = 2.5): Cue[] {
   return cues.map((c, i) => {
     const next = cues[i + 1];
     const end = next ? Math.max(c.end, Math.min(next.start, c.end + maxLinger)) : c.end + maxLinger;
-    return { ...c, end };
+    return { ...c, end, speechEnd: c.end };
   });
+}
+
+// --- roll-up chunking --------------------------------------------------------
+// A cue that wraps past ~2 lines would swallow the frame, so long cues are
+// split into lines that fit the overlay and shown through a 2-line roll-up
+// window. Tokens carry no timestamps (only the sentence does), so each line's
+// screen time is its proportional share — by visual width — of the cue's
+// start→speechEnd span.
+
+/** Visual width of a string in ems: CJK glyphs are full-width, the rest ~half. */
+export function textEms(s: string): number {
+  let n = 0;
+  for (const ch of s) n += ch.charCodeAt(0) < 0x2e80 ? 0.5 : 1;
+  return n;
+}
+
+// Closing punctuation must not orphan onto the next line — let it overflow.
+const CLOSERS = new Set("、。！？!?…‥,.)]」』】〉》）　 ");
+const isCloser = (s: string) => [...s].every((ch) => CLOSERS.has(ch));
+
+/** Greedy line fill: tokens never split; a closer squeezes onto a full line. */
+export function chunkTokens(tokens: Token[], budget: number): Token[][] {
+  const lines: Token[][] = [];
+  let line: Token[] = [];
+  let used = 0;
+  for (const t of tokens) {
+    const w = textEms(t.s);
+    if (line.length && used + w > budget && !isCloser(t.s)) {
+      lines.push(line);
+      line = [];
+      used = 0;
+    }
+    line.push(t);
+    used += w;
+  }
+  if (line.length) lines.push(line);
+  return lines.length ? lines : [tokens];
+}
+
+/** Plain-SRT fill: hard newlines break, then characters fill to the budget. */
+export function chunkText(text: string, budget: number): string[] {
+  const lines: string[] = [];
+  for (const para of text.split("\n")) {
+    let line = "";
+    let used = 0;
+    for (const ch of para) {
+      if (line && used + textEms(ch) > budget && !CLOSERS.has(ch)) {
+        lines.push(line);
+        line = "";
+        used = 0;
+      }
+      line += ch;
+      used += textEms(ch);
+    }
+    if (line.trim()) lines.push(line);
+  }
+  return lines.length ? lines : [text];
+}
+
+/** Real start times per roll-up line, from ASR-aligned token times (Token.t —
+    ASR episodes only): each line starts at its first timed token, line 0 is
+    clamped to the cue start, and clock glitches are forced monotonic. Returns
+    null when any line lacks a timed token (hand-crafted subs, old sidecars) —
+    the caller then paces by visual weight instead. */
+export function lineStartTimes(c: Cue, lines: Token[][]): number[] | null {
+  const starts: number[] = [];
+  for (const line of lines) {
+    const t = line.find((tk) => tk.t != null)?.t;
+    if (t == null) return null;
+    starts.push(t);
+  }
+  starts[0] = c.start;
+  for (let k = 1; k < starts.length; k++)
+    starts[k] = Math.max(starts[k], starts[k - 1]);
+  return starts;
+}
+
+/** Which line is live at t given real line start times: the last one started
+    (line 0 before any start; the last line holds through the linger tail). */
+export function lineIndexAtTimes(starts: number[], t: number): number {
+  let k = 0;
+  while (k + 1 < starts.length && t >= starts[k + 1]) k++;
+  return k;
+}
+
+/** Which line is live at time t: weights split start→speechEnd proportionally;
+    past speechEnd (the linger tail) the last line stays up. The fallback
+    pacing for cues without ASR-aligned token times. */
+export function chunkIndexAt(c: Cue, weights: number[], t: number): number {
+  if (weights.length <= 1) return 0;
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  const dur = Math.max((c.speechEnd ?? c.end) - c.start, 0.001);
+  const frac = Math.min(Math.max((t - c.start) / dur, 0), 1);
+  let acc = 0;
+  for (let k = 0; k < weights.length - 1; k++) {
+    acc += weights[k] / total;
+    if (frac < acc) return k;
+  }
+  return weights.length - 1;
 }
 
 /** Subtitle visibility: always · only lines with a keyword/★ word · never. */
@@ -391,6 +499,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
         step(dir);
         val.textContent = fmt();
         applySubPrefs();
+        repaintCue(); // font size changes the line budget → re-chunk
       });
       return b;
     };
@@ -447,6 +556,11 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   // --- subtitles ---------------------------------------------------------
   let cues: Cue[] = [];
   let current = -2; // ≠ -1 so the first timeupdate paints even in a gap
+  let lineIdx = -1; // roll-up line within the current cue
+  let cueLines: Token[][] | string[] = []; // the current cue, chunked
+  let lineWeights: number[] = []; // ems per line → each line's time share
+  let lineStarts: number[] | null = null; // ASR-aligned starts; null → weights
+  let badgeLine = 0; // which line carries the +1 badge (the target's line)
 
   const paintTaps = () => {
     const taps = getTaps(episodeId);
@@ -457,29 +571,89 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     });
   };
 
+  /** Line capacity in ems (CJK glyph ≈ 1em). Falls back to a wide budget when
+      unlaid-out (tests / display:none) so short cues stay whole. */
+  const budgetEms = () => {
+    const fs = parseFloat(getComputedStyle(overlay).fontSize) || 21;
+    return Math.max(6, ((overlay.clientWidth || 640) - 20) / fs);
+  };
+
+  const renderLine = (k: number): HTMLElement => {
+    const line = el("div", "sub-line");
+    const chunk = cueLines[k];
+    if (typeof chunk === "string") {
+      line.textContent = chunk;
+      return line;
+    }
+    const c = cues[current];
+    const tier = getSubTier();
+    const target = soleUnknown(c);
+    if (tier !== "off" && isIplus1(c) && k === badgeLine)
+      line.appendChild(el("span", "iplus-badge", "+1"));
+    for (const t of chunk) {
+      const n = tokenSpan(t, null);
+      const hl = tokenHighlight(t, tier, keywords, highValue, target, c.cls);
+      if (hl && n instanceof HTMLElement) n.classList.add(hl);
+      line.appendChild(n);
+    }
+    return line;
+  };
+
+  /** Paint the 2-line window for line k: k above the fold when rolling on
+      sequentially, else a fresh window (k-1 dimmed above, k below). */
+  const showLine = (k: number) => {
+    const roll = k === lineIdx + 1 && overlay.lastElementChild != null;
+    lineIdx = k;
+    if (roll) {
+      while (overlay.children.length > 1) overlay.firstElementChild!.remove();
+      overlay.lastElementChild!.classList.add("prev");
+      const line = renderLine(k);
+      line.classList.add("enter");
+      overlay.appendChild(line);
+    } else {
+      overlay.textContent = "";
+      if (k > 0) {
+        const prev = renderLine(k - 1);
+        prev.classList.add("prev");
+        overlay.appendChild(prev);
+      }
+      overlay.appendChild(renderLine(k));
+    }
+    paintTaps();
+  };
+
+  /** Live line for the current cue: real ASR-aligned starts when the tokens
+      carry them, else proportional-by-width (hand-crafted subs, old sidecars). */
+  const liveLine = (c: Cue, t: number) =>
+    lineStarts ? lineIndexAtTimes(lineStarts, t) : chunkIndexAt(c, lineWeights, t);
+
   const showCue = (i: number) => {
     current = i;
+    lineIdx = -1;
+    cueLines = [];
+    lineWeights = [];
+    lineStarts = null;
     overlay.textContent = "";
     if (i < 0) return;
     const c = cues[i];
     const mode = getSubMode();
     if (mode === "off") return;
     if (mode === "kw" && !cueTriggered(c, keywords, getTaps(episodeId))) return;
+    const budget = budgetEms();
     if (c.tokens) {
-      const tier = getSubTier();
+      const lines = chunkTokens(c.tokens, budget);
+      cueLines = lines;
+      lineWeights = lines.map((l) => l.reduce((n, t) => n + textEms(t.s), 0));
+      lineStarts = lineStartTimes(c, lines);
       const target = soleUnknown(c);
-      if (tier !== "off" && isIplus1(c))
-        overlay.appendChild(el("span", "iplus-badge", "+1"));
-      for (const t of c.tokens) {
-        const n = tokenSpan(t, null);
-        const hl = tokenHighlight(t, tier, keywords, highValue, target, c.cls);
-        if (hl && n instanceof HTMLElement) n.classList.add(hl);
-        overlay.appendChild(n);
-      }
-      paintTaps();
+      badgeLine = Math.max(0, lines.findIndex((l) => l.some((t) => t.l === target)));
     } else if (c.text) {
-      overlay.textContent = c.text;
-    }
+      const lines = chunkText(c.text, budget);
+      cueLines = lines;
+      lineWeights = lines.map(textEms);
+      badgeLine = 0;
+    } else return;
+    showLine(liveLine(c, video.currentTime));
   };
   const repaintCue = () => showCue(cueIndexAt(cues, video.currentTime));
 
@@ -608,6 +782,10 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   video.addEventListener("timeupdate", () => {
     const i = cueIndexAt(cues, video.currentTime);
     if (i !== current) showCue(i);
+    else if (i >= 0 && cueLines.length > 1) {
+      const k = liveLine(cues[i], video.currentTime);
+      if (k !== lineIdx) showLine(k);
+    }
     if (!scrubbing) scrub.value = String(video.currentTime);
     updateClock();
     if (Math.abs(video.currentTime - lastSaved) > 5) {
@@ -708,6 +886,10 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   };
   video.addEventListener("play", () => void acquireWake());
   video.addEventListener("pause", releaseWake);
+
+  // rotation / fullscreen change the overlay width → re-chunk the line fill
+  const onResize = () => repaintCue();
+  window.addEventListener("resize", onResize);
   const onVisibility = () => {
     if (document.hidden) savePos();
     else if (!video.paused) void acquireWake(); // the lock drops when backgrounded
@@ -722,6 +904,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     video.load();
     releaseWake();
     document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("resize", onResize);
   };
   window.addEventListener("hashchange", cleanup, { once: true });
 

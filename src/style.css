@@ -193,6 +193,10 @@ input {
   text-align: center; font-size: calc(1.3rem * var(--sub-scale, 1));
   line-height: 1.9; color: #fff;
   font-weight: 600;
+  /* roll-up window: at most ~2 lines tall, anchored to the bottom edge —
+     long cues are chunked into lines by the player and rolled through here */
+  display: flex; flex-direction: column; justify-content: flex-end;
+  max-height: calc(2 * 1.9em + 8px); overflow: hidden;
   /* classic broadcast look: white fill, black border all round */
   text-shadow:
     -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000,
@@ -201,6 +205,13 @@ input {
   pointer-events: none; /* gaps fall through to the stage's play/pause tap */
 }
 .subs-overlay .w { pointer-events: auto; }  /* …but words stay tappable */
+.subs-overlay .sub-line { width: 100%; flex-shrink: 0; }
+.subs-overlay .sub-line.prev { opacity: .75; } /* trailing context, still tappable */
+.subs-overlay .sub-line.enter { animation: sub-roll-in .18s ease-out; }
+@keyframes sub-roll-in {
+  from { transform: translateY(40%); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
 
 /* Word-level highlighting: TEXT COLOR ONLY over video — the prep doc's
    background/outline chips (.unk/.tap-*) are explicitly neutralized here.

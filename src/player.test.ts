@@ -4,6 +4,9 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  chunkIndexAt,
+  chunkText,
+  chunkTokens,
   cueIndexAt,
   cueTriggered,
   extendCues,
@@ -13,6 +16,8 @@ import {
   isIplus1,
   keywordIndex,
   lastStartedAt,
+  lineIndexAtTimes,
+  lineStartTimes,
   parseSrt,
   playerView,
   setSubTier,
@@ -21,6 +26,7 @@ import {
   stepSubSize,
   SUB_SIZES,
   SUB_RISE_MAX,
+  textEms,
   tokenHighlight,
 } from "./views/player";
 import type { Cue, SubTier } from "./views/player";
@@ -98,6 +104,81 @@ describe("extendCues", () => {
       { start: 3, end: 6, text: "b" },
     ]);
     expect(out[0].end).toBe(5);
+  });
+
+  it("preserves the original ASR end as speechEnd for roll-up pacing", () => {
+    const out = extendCues([{ start: 0, end: 2, text: "a" }]);
+    expect(out[0].speechEnd).toBe(2);
+    expect(out[0].end).toBe(4.5);
+  });
+});
+
+describe("roll-up chunking", () => {
+  const tok = (s: string, l?: string) => ({ s, l, c: !!l });
+
+  it("textEms: CJK glyphs count full-width, ASCII half", () => {
+    expect(textEms("公園")).toBe(2);
+    expect(textEms("ab")).toBe(1);
+    expect(textEms("公a")).toBe(1.5);
+  });
+
+  it("chunkTokens fills greedily and never splits a token", () => {
+    const lines = chunkTokens([tok("あいう"), tok("えおか"), tok("きくけ")], 6.5);
+    expect(lines.map((l) => l.map((t) => t.s).join(""))).toEqual(["あいうえおか", "きくけ"]);
+  });
+
+  it("chunkTokens lets closing punctuation overflow instead of orphaning", () => {
+    expect(chunkTokens([tok("あいうえおか"), tok("。")], 6).length).toBe(1);
+  });
+
+  it("chunkTokens keeps a single oversized token whole", () => {
+    expect(chunkTokens([tok("あいうえおかきく")], 3).length).toBe(1);
+  });
+
+  it("chunkText breaks at hard newlines and the width budget", () => {
+    expect(chunkText("あいう\nえお", 10)).toEqual(["あいう", "えお"]);
+    expect(chunkText("あいうえおかきくけこ", 4)).toEqual(["あいうえ", "おかきく", "けこ"]);
+    expect(chunkText("あいうえ。", 4)).toEqual(["あいうえ。"]); // closer squeezes on
+  });
+
+  it("chunkIndexAt splits time by line weight across start→speechEnd", () => {
+    const c: Cue = { start: 10, end: 22, speechEnd: 20 };
+    const w = [1, 1, 2]; // boundaries at 12.5 and 15
+    expect(chunkIndexAt(c, w, 10)).toBe(0);
+    expect(chunkIndexAt(c, w, 12.4)).toBe(0);
+    expect(chunkIndexAt(c, w, 12.6)).toBe(1);
+    expect(chunkIndexAt(c, w, 15.1)).toBe(2);
+  });
+
+  it("chunkIndexAt holds the last line through the linger tail and clamps", () => {
+    const c: Cue = { start: 10, end: 22, speechEnd: 20 };
+    expect(chunkIndexAt(c, [1, 1], 21)).toBe(1); // lingering past speechEnd
+    expect(chunkIndexAt(c, [1, 1], 9)).toBe(0); // before the start
+    expect(chunkIndexAt(c, [1], 999)).toBe(0); // single line: always 0
+  });
+
+  it("lineStartTimes reads each line's first timed token, clamped + monotonic", () => {
+    const c: Cue = { start: 10, end: 20 };
+    const starts = lineStartTimes(c, [
+      [tok("、"), { ...tok("あい", "あい"), t: 10.4 }], // untimed punct skipped
+      [{ ...tok("うえ", "うえ"), t: 14 }],
+      [{ ...tok("おか", "おか"), t: 13 }], // clock glitch → clamped to 14
+    ]);
+    expect(starts).toEqual([10, 14, 14]); // line 0 clamps to the cue start
+  });
+
+  it("lineStartTimes is null when any line has no timed token (fallback)", () => {
+    const c: Cue = { start: 0, end: 5 };
+    expect(lineStartTimes(c, [[{ ...tok("あ", "あ"), t: 0.5 }], [tok("い", "い")]])).toBeNull();
+    expect(lineStartTimes(c, [[tok("あ", "あ")]])).toBeNull(); // hand-crafted subs
+  });
+
+  it("lineIndexAtTimes picks the last started line and holds the ends", () => {
+    const starts = [10, 14, 17];
+    expect(lineIndexAtTimes(starts, 9)).toBe(0); // before the cue: first line
+    expect(lineIndexAtTimes(starts, 13.9)).toBe(0);
+    expect(lineIndexAtTimes(starts, 14)).toBe(1);
+    expect(lineIndexAtTimes(starts, 99)).toBe(2); // linger tail: last line
   });
 });
 
@@ -424,6 +505,109 @@ describe("playerView subtitle overlay", () => {
     btns.find((b) => b.textContent === "off")!.click();
     expect(getSubTier()).toBe("off");
     expect(root.querySelector(".subs-overlay .hl-target")).toBeNull();
+    root.remove();
+  });
+
+  it("rolls a long cue through a 2-line window instead of painting it whole", async () => {
+    // one 12s sentence of 9 ten-glyph words (90 ems) — at least 3 lines at any
+    // plausible budget, so the overlay must window it rather than dump it
+    const LONG = {
+      episode_id: EP,
+      candidates: [],
+      sentences: [
+        {
+          idx: 0,
+          start: 0,
+          end: 12,
+          cls: "comprehensible",
+          tokens: Array.from({ length: 9 }, (_, i) => ({
+            s: "あいうえおかきくけこ",
+            l: `w${i}`,
+            c: true,
+            k: true,
+          })),
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).includes("/transcript/")
+          ? new Response(JSON.stringify(LONG), { status: 200 })
+          : new Response("nope", { status: 404 }),
+      ),
+    );
+    saveSettings({ serverUrl: "http://pc.ts.net:8321", token: "tok" });
+    const root = playerView(EP);
+    document.body.appendChild(root);
+    await new Promise((r) => setTimeout(r, 0));
+    const video = root.querySelector("video")!;
+    const overlay = root.querySelector(".subs-overlay")!;
+
+    Object.defineProperty(video, "currentTime", { value: 0.1, configurable: true });
+    video.dispatchEvent(new Event("timeupdate"));
+    expect(overlay.querySelectorAll(".sub-line").length).toBe(1); // opening line alone
+    expect(overlay.querySelector(".w[data-lemma='w0']")).not.toBeNull();
+    expect(overlay.querySelector(".w[data-lemma='w8']")).toBeNull(); // tail not shown yet
+
+    Object.defineProperty(video, "currentTime", { value: 11.9, configurable: true });
+    video.dispatchEvent(new Event("timeupdate"));
+    const lines = overlay.querySelectorAll(".sub-line");
+    expect(lines.length).toBe(2); // window: previous + current, never more
+    expect(lines[0].classList.contains("prev")).toBe(true);
+    expect(lines[1].querySelector(".w[data-lemma='w8']")).not.toBeNull();
+    expect(overlay.querySelector(".w[data-lemma='w0']")).toBeNull(); // rolled out
+    root.remove();
+  });
+
+  it("paces the roll-up on ASR-aligned token times when present", async () => {
+    // 12s cue, but the speech is lopsided: first word at 0s, everything else
+    // crammed at 11s (a long mid-sentence pause). Proportional pacing would
+    // have rolled past line 0 by t=5; real times must hold it.
+    const TIMED = {
+      episode_id: EP,
+      candidates: [],
+      sentences: [
+        {
+          idx: 0,
+          start: 0,
+          end: 12,
+          cls: "comprehensible",
+          tokens: Array.from({ length: 9 }, (_, i) => ({
+            s: "あいうえおかきくけこ",
+            l: `w${i}`,
+            c: true,
+            k: true,
+            t: i === 0 ? 0 : 11 + i * 0.01,
+          })),
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).includes("/transcript/")
+          ? new Response(JSON.stringify(TIMED), { status: 200 })
+          : new Response("nope", { status: 404 }),
+      ),
+    );
+    saveSettings({ serverUrl: "http://pc.ts.net:8321", token: "tok" });
+    const root = playerView(EP);
+    document.body.appendChild(root);
+    await new Promise((r) => setTimeout(r, 0));
+    const video = root.querySelector("video")!;
+    const overlay = root.querySelector(".subs-overlay")!;
+
+    Object.defineProperty(video, "currentTime", { value: 5, configurable: true });
+    video.dispatchEvent(new Event("timeupdate"));
+    expect(overlay.querySelectorAll(".sub-line").length).toBe(1); // still line 0
+    expect(overlay.querySelector(".w[data-lemma='w0']")).not.toBeNull();
+
+    Object.defineProperty(video, "currentTime", { value: 11.5, configurable: true });
+    video.dispatchEvent(new Event("timeupdate"));
+    const lines = overlay.querySelectorAll(".sub-line");
+    expect(lines.length).toBe(2);
+    expect(lines[1].querySelector(".w[data-lemma='w8']")).not.toBeNull();
     root.remove();
   });
 

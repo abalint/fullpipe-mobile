@@ -40,6 +40,7 @@ export interface Token {
   c?: number | boolean; // content word (tappable)
   k?: number | boolean; // known per ledger
   f?: number; // corpus freq rank (absent = not in the corpus / old sidecar)
+  t?: number; // ASR-aligned start time, absolute seconds (ASR episodes only)
 }
 
 export interface Sentence {
