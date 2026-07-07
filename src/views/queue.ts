@@ -622,7 +622,27 @@ export function queueView(): HTMLElement {
   }
 
   async function load(silent = false): Promise<void> {
-    if (!silent) status.textContent = "loading…";
+    if (!silent) {
+      // Paint the cached queue immediately, showing only the offline-safe
+      // actions, so the list is usable while we probe the server. A dead or
+      // unreachable host no longer blanks the screen behind "loading…" until
+      // the fetch deadline — the live list (and online-only actions) swap in
+      // the moment the fetch returns. Skipped once jobs are already on screen
+      // (a manual refresh keeps the current list visible under "loading…").
+      if (!jobs.length) {
+        const snap = getCachedJobs();
+        if (snap) {
+          jobs = snap.jobs;
+          offline = true;
+          render();
+          status.textContent = `loading… · cached queue from ${new Date(snap.at).toLocaleString()}`;
+        } else {
+          status.textContent = "loading…";
+        }
+      } else {
+        status.textContent = "loading…";
+      }
+    }
     try {
       jobs = await api.listJobs();
       offline = false;

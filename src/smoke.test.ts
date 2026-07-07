@@ -23,6 +23,7 @@ import {
   submitTaps,
 } from "./store";
 import { flushOutbox } from "./sync";
+import { api, ApiError } from "./api";
 import { hms, sortJobs, starBar } from "./views/queue";
 import type { Job } from "./types";
 
@@ -235,6 +236,42 @@ describe("outbox", () => {
     expect(res.sent).toBe(1);
     expect(getOutbox().length).toBe(0); // the 404 didn't block the rating behind it
     expect(paths.length).toBe(2);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("api request timeout", () => {
+  it("aborts a hung request and reports it as unreachable (no HTTP status)", async () => {
+    saveSettings({ serverUrl: "http://pc.ts.net:8321", token: "tok" });
+    vi.useFakeTimers();
+    // a server that accepts the connection but never answers — the fetch only
+    // settles when its AbortSignal fires, exactly like a dead host on the tailnet
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () =>
+              reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+            );
+          }),
+      ),
+    );
+    const settled = api.listJobs().then(
+      () => ({ ok: true }) as const,
+      (e) => ({ ok: false, e }) as const,
+    );
+    await vi.advanceTimersByTimeAsync(6000); // trip the deadline
+    const outcome = await settled;
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.e).toBeInstanceOf(ApiError);
+      // undefined status → callers park writes in the outbox / fall back to the
+      // cached queue, rather than treating it as a hard rejection
+      expect((outcome.e as ApiError).status).toBeUndefined();
+      expect((outcome.e as ApiError).message).toMatch(/timed out/);
+    }
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 });

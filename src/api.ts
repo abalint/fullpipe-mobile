@@ -24,6 +24,28 @@ function withToken(url: string): string {
   return token ? `${url}?t=${encodeURIComponent(token)}` : url;
 }
 
+// Every JSON call gets a hard deadline. The server lives on the tailnet and
+// answers in well under a second when it's up (the slow work — curation, card
+// push, clip cutting — all runs off the request thread server-side), so if a
+// call hasn't returned in a few seconds the host is off or unreachable. Without
+// this, a dead server means fetch hangs on the OS connect timeout (30–120s on
+// Android) and the queue screen sits behind "loading…" the whole time.
+// Video downloads don't come through here (they go via Capacitor Filesystem in
+// video.ts), so they're never cut off by this deadline.
+const REQUEST_TIMEOUT_MS = 6000;
+
+/** fetch() with a timeout. Aborts the request after `ms`; the abort surfaces as
+    a network throw (no HTTP status), which callers treat as "unreachable". */
+async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { token } = getSettings();
   const headers: Record<string, string> = {
@@ -32,9 +54,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   let res: Response;
   try {
-    res = await fetch(base() + path, { ...init, headers });
+    res = await fetchWithTimeout(base() + path, { ...init, headers }, REQUEST_TIMEOUT_MS);
   } catch (e) {
-    throw new ApiError(`Server unreachable (${(e as Error).message})`);
+    const msg = (e as Error).name === "AbortError"
+      ? `timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
+      : (e as Error).message;
+    throw new ApiError(`Server unreachable (${msg})`);
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -95,9 +120,19 @@ export const api = {
     request<Definitions>(`/definitions/${encodeURIComponent(id)}`),
   fetchSubs: async (id: string): Promise<string> => {
     const { token } = getSettings();
-    const res = await fetch(api.subsUrl(id), {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(
+        api.subsUrl(id),
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+        REQUEST_TIMEOUT_MS,
+      );
+    } catch (e) {
+      const msg = (e as Error).name === "AbortError"
+        ? `timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
+        : (e as Error).message;
+      throw new ApiError(`subs unreachable (${msg})`);
+    }
     if (!res.ok) throw new ApiError(`subs: ${res.status}`, res.status);
     return res.text();
   },
