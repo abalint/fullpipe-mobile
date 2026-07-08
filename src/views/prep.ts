@@ -13,13 +13,12 @@ import {
   getCachedJobs,
   getCachedPrep,
   getSubmitted,
-  getTaps,
   pendingTapCount,
   queuePassive,
   queueWatched,
   submitTaps,
 } from "../store";
-import { deleteVideo, getVideoRecord, playVideo } from "../video";
+import { deleteVideo } from "../video";
 import { flushOutbox } from "../sync";
 import { ratingBlock } from "./queue";
 import type { PrepDoc } from "../types";
@@ -62,25 +61,27 @@ export function prepView(episodeId: string): HTMLElement {
 
     const title = el("h1", "", doc.episode.title || doc.episode.id);
     const bar = el("div", "submit-bar");
-    const submit = el("button", "primary", "Submit feedback") as HTMLButtonElement;
-    const watchedBtn = el("button", "", "Mark watched") as HTMLButtonElement;
-    const listenBtn = el("button", "", "🎧 Watched + listen") as HTMLButtonElement;
-    const noCardsBtn = el("button", "", "Watched · no cards") as HTMLButtonElement;
-    const copyBtn = el("button", "", "Copy blob") as HTMLButtonElement;
-    const barStatus = el("span", "muted");
-    const watch = el("a", "btn", "▶ watch") as HTMLAnchorElement;
+    const submit = el("button", "primary grow", "Submit feedback") as HTMLButtonElement;
+    const watchedBtn = el("button", "", "✓ Mark watched") as HTMLButtonElement;
+    watchedBtn.title = "Mark watched — pushes the selected cards to Anki";
+    const listenBtn = el("button", "", "🎧 + listen") as HTMLButtonElement;
+    listenBtn.title = "Mark watched + keep on the Listen tab for passive audio";
+    const noCardsBtn = el("button", "", "No cards") as HTMLButtonElement;
+    noCardsBtn.title = "Mark watched without pushing cards (disliked it)";
+    const barStatus = el("div", "muted bar-status");
+    const watch = el("a", "btn", "▶ Watch") as HTMLAnchorElement;
     watch.href = `#/player/${encodeURIComponent(episodeId)}`;
-    bar.append(watch);
-    if (getVideoRecord(episodeId)) {
-      const vlc = el("button", "", "VLC") as HTMLButtonElement;
-      vlc.addEventListener("click", () => {
-        void playVideo(episodeId, doc.episode.title).catch(
-          (e) => (barStatus.textContent = `⚠ ${(e as Error).message}`),
-        );
-      });
-      bar.append(vlc);
-    }
-    bar.append(submit, watchedBtn, listenBtn, noCardsBtn, copyBtn, barStatus);
+
+    // Row 1 — pre-watch: play + the step-1 feedback submit. (VLC handoff
+    // lives on the queue row and in the player; no button here.)
+    const actionRow = el("div", "bar-row");
+    actionRow.append(watch, submit);
+
+    // Row 2 — the close-out trio; the caption carries the shared "this marks
+    // it watched" semantics so the labels can stay short and equal-width.
+    const closeRow = el("div", "bar-row");
+    closeRow.append(watchedBtn, listenBtn, noCardsBtn);
+    bar.append(actionRow, el("div", "bar-caption", "after watching"), closeRow);
 
     // Rating is available the whole time, not just after Mark watched — rate
     // a dud early, then either "Watched · no cards" (exposures still count)
@@ -112,7 +113,11 @@ export function prepView(episodeId: string): HTMLElement {
         if (!engaged) mountRating(j.rating ?? null, j.tags ?? []);
       })
       .catch(() => {});
-    bar.insertBefore(stars, barStatus);
+
+    // Row 3 — rating + tags.
+    const metaRow = el("div", "bar-meta");
+    metaRow.append(stars);
+    bar.append(metaRow, barStatus);
 
     const updateSubmit = (pending: number) => {
       submit.textContent = pending ? `Submit feedback (${pending})` : "Submit feedback";
@@ -229,24 +234,6 @@ export function prepView(episodeId: string): HTMLElement {
     watchedBtn.addEventListener("click", () => void finishWatched(true));
     listenBtn.addEventListener("click", () => void finishWatched(true, true));
     noCardsBtn.addEventListener("click", () => void finishWatched(false));
-
-    // P9 offline fallback: the copy-paste corrections blob still works.
-    copyBtn.addEventListener("click", async () => {
-      const taps = Object.entries(getTaps(episodeId));
-      const blob = JSON.stringify({
-        episode_id: episodeId,
-        batch_id: Array.from(crypto.getRandomValues(new Uint8Array(8)))
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join(""),
-        taps,
-      });
-      try {
-        await navigator.clipboard.writeText(blob);
-        barStatus.textContent = "blob copied ✔";
-      } catch {
-        prompt("copy manually:", blob);
-      }
-    });
   }
 
   void load();

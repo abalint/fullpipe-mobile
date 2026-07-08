@@ -182,11 +182,30 @@ input {
   border: 1px solid var(--border); background: var(--card); color: var(--fg);
 }
 
+/* End-of-article action bar (in normal flow — nothing floats over the doc).
+   Buttons in a row split the width evenly (flex-basis 0) so labels never
+   dictate size; every target clears the 44px thumb minimum. */
 .submit-bar {
-  position: sticky; bottom: 0; display: flex; gap: 8px; align-items: center;
-  background: var(--bg); padding: 10px 0; border-top: 1px solid var(--border);
-  margin-top: 20px;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px 0; border-top: 1px solid var(--border);
+  margin-top: 24px;
 }
+.bar-row { display: flex; gap: 8px; }
+.bar-row > button, .bar-row > .btn {
+  flex: 1 1 0; min-width: 0; min-height: 44px; padding: 11px 6px;
+  font-size: .9rem; line-height: 1.2; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* the row's primary action gets proportionally more room, not label-width */
+.bar-row > .grow { flex-grow: 1.6; }
+.bar-caption {
+  font-size: .62rem; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .06em; margin-bottom: -4px;
+}
+.bar-meta { display: flex; gap: 8px; align-items: flex-start; }
+.bar-meta > :first-child { flex: 1; min-width: 0; }
+.bar-status { font-size: .85rem; }
+.bar-status:empty { display: none; }
 
 /* --- in-app player ----------------------------------------------------------
    Stage (video + subtitle overlay) over a custom control bar; native controls
