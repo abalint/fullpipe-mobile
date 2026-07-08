@@ -16,12 +16,16 @@
 // tiered — off / focus (keywords + high-value + i+1 target) / learn (+ all
 // unknown words) / all (+ every corpus-tracked word) — with a "+1" badge on
 // i+1 lines. The Aa panel holds size / height / tier prefs (global, like the
-// cc mode). Custom controls (replay line / prev / next line, speed, furigana,
-// fullscreen), resume position, wake lock while playing.
+// cc mode). Custom controls (audio/video toggle, prev / next line, speed,
+// furigana, fullscreen), resume position, wake lock while playing. The 🎧
+// toggle hands the current position off to the native passive-audio service
+// so the episode keeps playing with the screen off, and back again.
 
 import { Capacitor } from "@capacitor/core";
+import type { PluginListenerHandle } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { api } from "../api";
+import { PassiveAudio } from "../audio";
 import { rubyWord, segsNode, tokenSpan } from "../prep-render";
 import { cachePrep, cycleTap, getCachedPrep, getTaps } from "../store";
 import {
@@ -463,8 +467,9 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   seekRow.append(scrub, clock);
 
   const btnRow = el("div", "row buttons");
+  const audioBtn = el("button", "pv", "🎧") as HTMLButtonElement;
+  audioBtn.title = "listen as background audio (screen off)";
   const playBtn = el("button", "pv", "▶") as HTMLButtonElement;
-  const replayBtn = el("button", "pv", "⟲") as HTMLButtonElement;
   const prevBtn = el("button", "pv", "⏮") as HTMLButtonElement;
   const nextBtn = el("button", "pv", "⏭") as HTMLButtonElement;
   const speedBtn = el("button", "pv", "1×") as HTMLButtonElement;
@@ -472,7 +477,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   const rubyBtn = el("button", "pv on", "あ") as HTMLButtonElement;
   const subBtn = el("button", "pv", "Aa") as HTMLButtonElement;
   const fsBtn = el("button", "pv", "⛶") as HTMLButtonElement;
-  btnRow.append(replayBtn, prevBtn, playBtn, nextBtn, speedBtn, ccBtn, rubyBtn, subBtn, fsBtn);
+  btnRow.append(audioBtn, prevBtn, playBtn, nextBtn, speedBtn, ccBtn, rubyBtn, subBtn, fsBtn);
 
   // --- subtitle settings: size / height / highlight tier (Aa toggles) -----
   const applySubPrefs = () => {
@@ -723,6 +728,8 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   })();
 
   // --- source: the downloaded file (everything is local-first) ------------
+  // the raw file:// URI is also what audio mode hands to the native service
+  let fileUri: string | null = null;
   void (async () => {
     const rec = getVideoRecord(episodeId);
     if (!rec) {
@@ -731,6 +738,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     }
     try {
       const { uri } = await Filesystem.getUri({ path: rec.path, directory: Directory.Data });
+      fileUri = uri;
       video.src = Capacitor.convertFileSrc(uri);
     } catch (e) {
       status.textContent = `⚠ ${(e as Error).message}`;
@@ -783,8 +791,87 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   });
   scrub.addEventListener("change", () => (scrubbing = false));
 
+  // --- audio mode: hand the current position to the native passive-audio
+  // service so playback survives the screen turning off (the Listen tab's
+  // foreground service + lock-screen controls), then take it back on toggle.
+  let audioMode = false;
+  let audioListener: Promise<PluginListenerHandle> | null = null;
+
+  const attachAudioListener = () => {
+    audioListener = PassiveAudio.addListener("state", (s) => {
+      if (audioMode) playBtn.textContent = s.playing ? "⏸" : "▶";
+    });
+  };
+
+  const setAudioMode = (on: boolean) => {
+    audioMode = on;
+    audioBtn.classList.toggle("on", on);
+    audioBtn.title = on
+      ? "playing as background audio — tap for video"
+      : "listen as background audio (screen off)";
+    root.classList.toggle("audio-mode", on);
+    status.textContent = on ? "🎧 audio mode — keeps playing with the screen off" : "";
+  };
+
+  const enterAudio = async () => {
+    if (!fileUri) {
+      status.textContent = "⚠ video still loading…";
+      return;
+    }
+    const startMs = Math.floor(video.currentTime * 1000);
+    video.pause();
+    setAudioMode(true);
+    playBtn.textContent = "⏸";
+    try {
+      await PassiveAudio.play({
+        items: [{ src: fileUri, title: title || episodeId, episodeId }],
+        startIndex: 0,
+        speed: SPEEDS[speedIdx],
+        startPositionMs: startMs,
+      });
+      attachAudioListener();
+    } catch (e) {
+      setAudioMode(false);
+      status.textContent = `⚠ ${(e as Error).message}`;
+    }
+  };
+
+  const exitAudio = async () => {
+    let posSec = video.currentTime;
+    try {
+      const st = await PassiveAudio.getState();
+      if (st.positionMs != null && st.positionMs > 0) posSec = st.positionMs / 1000;
+      await PassiveAudio.stop();
+    } catch {
+      /* nothing playing — just fall back to the video's own position */
+    }
+    void (await audioListener)?.remove();
+    audioListener = null;
+    setAudioMode(false);
+    if (Number.isFinite(posSec) && posSec > 0) video.currentTime = posSec;
+    void video.play().catch(() => {});
+  };
+
+  audioBtn.addEventListener("click", () => void (audioMode ? exitAudio() : enterAudio()));
+
+  // returning to the player while this episode is already playing in the
+  // background: pick the audio session back up instead of starting a new one
+  void PassiveAudio.getState()
+    .then((s) => {
+      if (!audioMode && s.running && s.episodeId === episodeId) {
+        setAudioMode(true);
+        playBtn.textContent = s.playing ? "⏸" : "▶";
+        attachAudioListener();
+      }
+    })
+    .catch(() => {});
+
   // --- transport ----------------------------------------------------------
   const togglePlay = () => {
+    if (audioMode) {
+      void PassiveAudio.toggle();
+      return;
+    }
     if (video.paused) void video.play().catch(() => {});
     else video.pause();
   };
@@ -803,15 +890,15 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     savePos();
   });
 
-  // replay/prev/next anchor on the last cue that *started* (works in gaps too)
+  // prev/next anchor on the last cue that *started* (works in gaps too);
+  // cue-level seeking is a video-mode gesture, so it's inert in audio mode
   const seekCue = (offset: number) => {
-    if (!cues.length) return;
+    if (audioMode || !cues.length) return;
     const anchor = lastStartedAt(cues, video.currentTime);
     const i = Math.max(0, Math.min(cues.length - 1, (anchor < 0 ? 0 : anchor) + offset));
     video.currentTime = cues[i].start;
     showCue(cueIndexAt(cues, video.currentTime));
   };
-  replayBtn.addEventListener("click", () => seekCue(0));
   prevBtn.addEventListener("click", () => seekCue(-1));
   nextBtn.addEventListener("click", () => seekCue(+1));
 
@@ -820,6 +907,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     speedIdx = (speedIdx + 1) % SPEEDS.length;
     video.playbackRate = SPEEDS[speedIdx];
     speedBtn.textContent = `${SPEEDS[speedIdx]}×`;
+    if (audioMode) void PassiveAudio.setSpeed({ speed: SPEEDS[speedIdx] });
   });
 
   const ccLabel = (m: SubMode) => (m === "on" ? "cc" : m === "kw" ? "cc:kw" : "cc:off");
@@ -879,13 +967,16 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   };
   document.addEventListener("visibilitychange", onVisibility);
 
-  // --- teardown: a detached <video> keeps playing, so stop it on route-away
+  // --- teardown: a detached <video> keeps playing, so stop it on route-away.
+  // Audio mode is deliberately NOT stopped — leaving the screen is the whole
+  // point (it plays on in the background); we only drop our state listener.
   const cleanup = () => {
     savePos();
     video.pause();
     video.removeAttribute("src");
     video.load();
     releaseWake();
+    if (audioListener) void audioListener.then((h) => h.remove());
     document.removeEventListener("visibilitychange", onVisibility);
     window.removeEventListener("resize", onResize);
   };

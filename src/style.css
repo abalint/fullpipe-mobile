@@ -214,6 +214,10 @@ input {
 .player-stage { position: relative; background: #000; border-radius: 10px;
                 overflow: hidden; }
 .player-stage video { display: block; width: 100%; background: #000; }
+/* audio mode: playback is handed to the native background service, so the
+   (paused) frame dims and the subs drop — there's nothing to watch */
+.player-view.audio-mode .player-stage { opacity: .5; }
+.player-view.audio-mode .subs-overlay { display: none; }
 .subs-overlay {
   /* --sub-scale / --sub-rise are the player's size & height prefs (Aa panel) */
   position: absolute; left: 0; right: 0;

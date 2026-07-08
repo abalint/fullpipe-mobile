@@ -23,10 +23,16 @@ export interface PassiveAudioState {
   index: number;
   episodeId?: string;
   speed?: number;
+  positionMs?: number; // current track position — hands back to the video player
 }
 
 interface PassiveAudioPlugin {
-  play(opts: { items: PassiveTrack[]; startIndex?: number; speed?: number }): Promise<void>;
+  play(opts: {
+    items: PassiveTrack[];
+    startIndex?: number;
+    speed?: number;
+    startPositionMs?: number; // resume the track here (video-player handoff)
+  }): Promise<void>;
   toggle(): Promise<void>;
   next(): Promise<void>;
   previous(): Promise<void>;

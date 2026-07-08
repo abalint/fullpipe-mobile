@@ -61,11 +61,13 @@ public class PassiveAudioService extends Service {
         final List<Track> tracks;
         final int startIndex;
         final float speed;
+        final int startPositionMs;
 
-        Load(List<Track> tracks, int startIndex, float speed) {
+        Load(List<Track> tracks, int startIndex, float speed, int startPositionMs) {
             this.tracks = tracks;
             this.startIndex = startIndex;
             this.speed = speed;
+            this.startPositionMs = startPositionMs;
         }
     }
 
@@ -167,7 +169,8 @@ public class PassiveAudioService extends Service {
                 tracks.clear();
                 tracks.addAll(load.tracks);
                 speed = load.speed;
-                startAt(Math.max(0, Math.min(load.startIndex, tracks.size() - 1)));
+                startAt(Math.max(0, Math.min(load.startIndex, tracks.size() - 1)),
+                        load.startPositionMs);
             }
         } else if (ACTION_TOGGLE.equals(action)) {
             toggle();
@@ -184,6 +187,12 @@ public class PassiveAudioService extends Service {
     // --- playback ----------------------------------------------------------
 
     private void startAt(int i) {
+        startAt(i, 0);
+    }
+
+    /** Load and play track `i`, seeking to `seekMs` before starting (used when
+        the video player hands a mid-episode position over to audio mode). */
+    private void startAt(int i, int seekMs) {
         releasePlayer();
         if (tracks.isEmpty()) return;
         index = ((i % tracks.size()) + tracks.size()) % tracks.size();
@@ -205,6 +214,7 @@ public class PassiveAudioService extends Service {
             return;
         }
         player.setOnPreparedListener(mp -> {
+            if (seekMs > 0) mp.seekTo(seekMs);
             applySpeed();
             requestFocus();
             mp.start();
@@ -323,6 +333,10 @@ public class PassiveAudioService extends Service {
 
     float getSpeed() {
         return speed;
+    }
+
+    long getPositionMs() {
+        return currentPosition();
     }
 
     String currentEpisodeId() {

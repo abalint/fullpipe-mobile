@@ -49,6 +49,7 @@ public class PassiveAudioPlugin extends Plugin {
         o.put("playing", s != null && s.isPlaying());
         o.put("index", s != null ? s.getIndex() : -1);
         o.put("speed", s != null ? s.getSpeed() : 1f);
+        o.put("positionMs", s != null ? s.getPositionMs() : 0);
         String ep = s != null ? s.currentEpisodeId() : null;
         if (ep != null) o.put("episodeId", ep);
         return o;
@@ -96,8 +97,9 @@ public class PassiveAudioPlugin extends Plugin {
         }
         int start = call.getInt("startIndex", 0);
         float speed = call.getFloat("speed", 1f);
+        int startPositionMs = call.getInt("startPositionMs", 0);
         PassiveAudioService.pendingLoad =
-                new PassiveAudioService.Load(tracks, start, speed);
+                new PassiveAudioService.Load(tracks, start, speed, startPositionMs);
         Intent i = new Intent(getContext(), PassiveAudioService.class)
                 .setAction(PassiveAudioService.ACTION_LOAD);
         ContextCompat.startForegroundService(getContext(), i);
