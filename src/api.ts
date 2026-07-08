@@ -103,9 +103,9 @@ export const api = {
       watched: boolean;
       cards?: { queued?: number; note?: string; pushed?: number; error?: string; deck?: string };
     }>(`/watched/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ cards }) }),
-  // media/artifact URLs carry the token as ?t= too: <video src> and
-  // Filesystem.downloadFile can't always send headers (server media_auth
-  // accepts either; tailnet-only traffic, so a query token is fine)
+  // media/artifact URLs carry the token as ?t= too: Filesystem.downloadFile
+  // can't always send headers (server media_auth accepts either;
+  // tailnet-only traffic, so a query token is fine)
   videoUrl: (id: string) => withToken(`${base()}/video/${encodeURIComponent(id)}`),
   subsUrl: (id: string) => withToken(`${base()}/video/${encodeURIComponent(id)}/subs`),
   transcriptUrl: (id: string) => `${base()}/transcript/${encodeURIComponent(id)}`,

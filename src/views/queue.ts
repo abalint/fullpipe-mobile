@@ -24,7 +24,7 @@ import {
   removeEpisodeActions,
 } from "../store";
 import { flushOutbox } from "../sync";
-import { deleteVideo, downloadVideo, getPosition, getVideoRecord, playVideo } from "../video";
+import { deleteVideo, downloadVideo, getPosition, getVideoRecord } from "../video";
 import type { Job, JobState } from "../types";
 
 const STAGE1: JobState[] = ["downloading", "transcribing", "tokenizing"];
@@ -390,18 +390,13 @@ function jobRow(
     open.href = `#/prep/${encodeURIComponent(job.episode_id)}`;
     actions.appendChild(open);
   }
-  // video: download once Stage 1 has it, then play in-app (VLC as fallback)
+  // video: download once Stage 1 has it, then play in-app
   if (HAS_VIDEO.includes(job.state)) {
     const ep = job.episode_id;
     if (getVideoRecord(ep)) {
       const play = el("a", "small btn", pos != null && pos > 0 ? "▶ resume" : "▶ play") as HTMLAnchorElement;
       play.href = `#/player/${encodeURIComponent(ep)}`;
       actions.appendChild(play);
-      const vlc = el("button", "small", "VLC") as HTMLButtonElement;
-      vlc.addEventListener("click", () => {
-        void playVideo(ep, job.title).catch((e) => alert((e as Error).message));
-      });
-      actions.appendChild(vlc);
     } else if (!offline) {
       const dl = el("button", "small", "⬇ video") as HTMLButtonElement;
       dl.addEventListener("click", async () => {
@@ -420,10 +415,6 @@ function jobRow(
         }
       });
       actions.appendChild(dl);
-      // not downloaded yet — the in-app player can still stream it
-      const stream = el("a", "small btn", "▶ stream") as HTMLAnchorElement;
-      stream.href = `#/player/${encodeURIComponent(ep)}`;
-      actions.appendChild(stream);
     }
   }
   row.appendChild(actions);

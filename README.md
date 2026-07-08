@@ -54,7 +54,7 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   docs are also cached on first view and auto-cached for every staged episode
   whenever the queue loads online. The queue screen itself falls back to the
   last `GET /jobs` snapshot when unreachable, with server-only actions
-  (curate, delete, download, stream) hidden and everything local still live.
+  (curate, delete, download) hidden and everything local still live.
   Every write is a typed action in the outbox — tap batches, mark-watched,
   ratings, even enqueues — flushed FIFO on submit / app-foreground /
   network-return, so an episode's feedback lands before its close-out. Each
@@ -70,8 +70,8 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   shown regardless of the star); taps are debounced and append a review via
   `POST /rating {rating, tags}` — re-rating never overwrites, the server's
   on-read verdict takes the latest. Current rating + tags come back on `GET /jobs`.
-- **Player** (`#/player/<id>[/<sec>]`): plays the downloaded file when present
-  (Capacitor local server → seek works), else streams from the sync server.
+- **Player** (`#/player/<id>[/<sec>]`): plays the downloaded file
+  (Capacitor local server → seek works) — download first from the queue row.
   Subtitles are an overlay built from the tokenized transcript
   (`GET /transcript`, cached at download as `videos/<ep>.transcript.json`) —
   every content word is a tap target feeding the *same* per-episode tap store
@@ -101,9 +101,8 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   Controls: replay-current-line, prev/next
   line, speed cycle, furigana toggle, fullscreen (+landscape lock), resume
   position (cleared at watched), wake lock while playing. Prep-doc sentence
-  timestamps deep-link into the player at that moment. VLC handoff survives
-  as a fallback button. WorkManager background pulls (the MOBILE.md
-  decoupled-pull flow) are not built yet.
+  timestamps deep-link into the player at that moment. WorkManager
+  background pulls (the MOBILE.md decoupled-pull flow) are not built yet.
 - First run with no server configured lands on Settings.
 
 ## Not yet built

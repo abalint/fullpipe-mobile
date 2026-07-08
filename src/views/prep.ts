@@ -72,8 +72,7 @@ export function prepView(episodeId: string): HTMLElement {
     const watch = el("a", "btn", "▶ Watch") as HTMLAnchorElement;
     watch.href = `#/player/${encodeURIComponent(episodeId)}`;
 
-    // Row 1 — pre-watch: play + the step-1 feedback submit. (VLC handoff
-    // lives on the queue row and in the player; no button here.)
+    // Row 1 — pre-watch: play + the step-1 feedback submit.
     const actionRow = el("div", "bar-row");
     actionRow.append(watch, submit);
 

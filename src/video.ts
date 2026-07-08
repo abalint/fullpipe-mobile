@@ -1,20 +1,14 @@
 // Episode video: download-then-play (MOBILE.md decoupled pulls — manual
 // trigger for now, WorkManager later). Files land in app-internal storage
-// (videos/<episode>.mp4 + .srt sidecar) and are handed to an external player
-// (VLC) as content:// grants via the ExternalPlayer plugin. Deleted at
-// mark-watched — unless the episode is shelved for passive listening ("keep to
-// listen"), which pins the file so its audio plays straight off the device.
+// (videos/<episode>.mp4 + .srt sidecar) and play in the in-app player.
+// Deleted at mark-watched — unless the episode is shelved for passive
+// listening ("keep to listen"), which pins the file so its audio plays
+// straight off the device.
 
-import { registerPlugin } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { api } from "./api";
 import { cachePrep, getSettings } from "./store";
 import type { Definitions, TranscriptDoc } from "./types";
-
-interface ExternalPlayerPlugin {
-  play(opts: { video: string; subs?: string; title?: string }): Promise<void>;
-}
-const ExternalPlayer = registerPlugin<ExternalPlayerPlugin>("ExternalPlayer");
 
 export interface VideoRecord {
   path: string;
@@ -198,7 +192,7 @@ async function readLocalJson<T>(path: string | undefined): Promise<T | null> {
 }
 
 /** The downloaded tokenized track, or null when absent/unreadable (older
-    download, endpoint missing) — the player then falls back to SRT/stream. */
+    download, endpoint missing) — the player then falls back to SRT. */
 export function loadLocalTranscript(ep: string): Promise<TranscriptDoc | null> {
   return readLocalJson<TranscriptDoc>(getVideoRecord(ep)?.transcriptPath);
 }
@@ -206,17 +200,6 @@ export function loadLocalTranscript(ep: string): Promise<TranscriptDoc | null> {
 /** The downloaded per-episode dictionary, or null (older download / no db). */
 export function loadLocalDefinitions(ep: string): Promise<Definitions | null> {
   return readLocalJson<Definitions>(getVideoRecord(ep)?.defsPath);
-}
-
-/** Launch the downloaded episode in VLC (or whatever handles video/mp4). */
-export async function playVideo(ep: string, title?: string): Promise<void> {
-  const rec = getVideoRecord(ep);
-  if (!rec) throw new Error("video not downloaded");
-  const video = await Filesystem.getUri({ path: rec.path, directory: Directory.Data });
-  const subs = rec.subsPath
-    ? await Filesystem.getUri({ path: rec.subsPath, directory: Directory.Data })
-    : null;
-  await ExternalPlayer.play({ video: video.uri, subs: subs?.uri, title });
 }
 
 export function fmtSize(bytes: number): string {

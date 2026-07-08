@@ -1,6 +1,6 @@
-// In-app learning player. Plays the downloaded file when present (Capacitor's
-// local server → range requests → seeking works), else streams from the sync
-// server. Subtitles are a custom overlay driven by the tokenized transcript —
+// In-app learning player. Plays the downloaded file (Capacitor's local
+// server → range requests → seeking works) — episodes must be downloaded
+// first. Subtitles are a custom overlay driven by the tokenized transcript —
 // the same token markup + tap store as the prep doc, so marking a word here
 // is the same act as marking it there — with a plain-SRT fallback when no
 // transcript is available. Long sentences roll up broadcast-style: the cue is
@@ -30,7 +30,6 @@ import {
   getVideoRecord,
   loadLocalDefinitions,
   loadLocalTranscript,
-  playVideo,
   savePosition,
 } from "../video";
 import type { Definitions, GlossEntry, PrepDoc, Segs, TapMark, Token } from "../types";
@@ -540,16 +539,6 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   const prepLink = el("a", "btn small", "open prep doc") as HTMLAnchorElement;
   prepLink.href = `#/prep/${encodeURIComponent(episodeId)}`;
   footer.appendChild(prepLink);
-  if (getVideoRecord(episodeId)) {
-    const vlc = el("button", "small", "VLC") as HTMLButtonElement;
-    vlc.addEventListener("click", () => {
-      video.pause();
-      void playVideo(episodeId, title).catch(
-        (e) => (status.textContent = `⚠ ${(e as Error).message}`),
-      );
-    });
-    footer.appendChild(vlc);
-  }
 
   root.append(stage, controls, status, footer);
 
@@ -733,29 +722,23 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     }
   })();
 
-  // --- source: local file when downloaded, else stream --------------------
+  // --- source: the downloaded file (everything is local-first) ------------
   void (async () => {
     const rec = getVideoRecord(episodeId);
-    if (rec) {
-      try {
-        const { uri } = await Filesystem.getUri({ path: rec.path, directory: Directory.Data });
-        video.src = Capacitor.convertFileSrc(uri);
-        return;
-      } catch {
-        /* record without file — fall back to streaming */
-      }
+    if (!rec) {
+      status.textContent = "⚠ not downloaded — ⬇ video on the queue screen first";
+      return;
     }
     try {
-      video.src = api.videoUrl(episodeId);
+      const { uri } = await Filesystem.getUri({ path: rec.path, directory: Directory.Data });
+      video.src = Capacitor.convertFileSrc(uri);
     } catch (e) {
-      status.textContent = `⚠ ${(e as Error).message}`; // no server configured
+      status.textContent = `⚠ ${(e as Error).message}`;
     }
   })();
 
   video.addEventListener("error", () => {
-    status.textContent = getVideoRecord(episodeId)
-      ? "⚠ playback failed — try the VLC button"
-      : "⚠ playback failed — server unreachable and no local copy (⬇ video on the queue screen)";
+    status.textContent = "⚠ playback failed — re-download the video from the queue screen";
   });
 
   // --- position: deep-link > saved; save throttled, clear near the end ----
