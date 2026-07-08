@@ -4,6 +4,7 @@
 // learning, snoozed until more exposures). Server-backed; needs a connection.
 
 import { api, ApiError } from "../api";
+import { rubyWord, segsNode } from "../prep-render";
 import type { ConfirmCandidate, DictEntry } from "../types";
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -24,13 +25,10 @@ function candidateCard(c: ConfirmCandidate, onDone: (known: boolean) => void): H
 
   const head = el("div", "cc-head");
   const word = el("span", "cc-word");
-  if (c.reading && c.reading !== c.lemma) {
-    const ruby = document.createElement("ruby");
-    ruby.append(document.createTextNode(c.lemma), Object.assign(document.createElement("rt"), { textContent: c.reading }));
-    word.appendChild(ruby);
-  } else {
-    word.textContent = c.lemma;
-  }
+  // furigana over the kanji only — reading_segs is pre-split on the PC; fall
+  // back to whole-word ruby for old servers that don't send it
+  if (c.reading_segs?.length) word.appendChild(segsNode(c.reading_segs));
+  else word.appendChild(rubyWord(c.lemma, c.reading));
   head.appendChild(word);
   const seen = c.episode_spread === 1 ? "1 episode" : `${c.episode_spread} episodes`;
   head.appendChild(el("span", "cc-seen", `seen in ${seen}`));

@@ -343,11 +343,11 @@ describe("statsView", () => {
 
 describe("confirmView", () => {
   const cands: ConfirmCandidate[] = [
-    { lemma: "行く", reading: "いく", freq_rank: 0, exposure_count: 24,
-      episode_spread: 24, episodes: ["Ep A", "Ep B"],
+    { lemma: "行く", reading: "いく", reading_segs: [["行", "い"], ["く", null]],
+      freq_rank: 0, exposure_count: 24, episode_spread: 24, episodes: ["Ep A", "Ep B"],
       senses: [{ k: ["行く"], r: ["いく"], s: [{ pos: ["v5k-s"], g: ["to go"] }] }] },
-    { lemma: "来る", reading: "くる", freq_rank: 4, exposure_count: 24,
-      episode_spread: 24, episodes: [] },
+    { lemma: "来る", reading: "くる", reading_segs: [["来", "く"], ["る", null]],
+      freq_rank: 4, exposure_count: 24, episode_spread: 24, episodes: [] },
   ];
 
   it("renders a card per candidate with a gloss and answer buttons", async () => {
@@ -357,6 +357,13 @@ describe("confirmView", () => {
     await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(2));
     expect(root.textContent).toContain("to go"); // JMdict gloss shown
     expect(root.querySelector(".status")!.textContent).toContain("2 words");
+    // furigana lands on the kanji only: 行 is inside a <ruby> with rt い, and
+    // the okurigana く is a bare text node (no ruby over it)
+    const firstWord = root.querySelector(".cc-word")!;
+    const ruby = firstWord.querySelector("ruby")!;
+    expect(ruby.querySelector("rt")!.textContent).toBe("い");
+    expect(ruby.firstChild!.textContent).toBe("行"); // ruby base is the kanji only
+    expect(firstWord.lastChild!.textContent).toBe("く"); // trailing く stays bare
     root.remove();
     vi.restoreAllMocks();
   });

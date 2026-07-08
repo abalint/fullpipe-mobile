@@ -143,6 +143,7 @@ export interface Stats {
 export interface ConfirmCandidate {
   lemma: string;
   reading?: string | null;
+  reading_segs?: Segs; // furigana over kanji only ([surface, reading|null] pairs)
   pos?: string | null;
   freq_rank?: number | null;
   exposure_count: number;
