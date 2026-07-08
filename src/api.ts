@@ -4,6 +4,7 @@
 import type {
   ConfirmCandidate,
   Definitions,
+  ItemKind,
   Job,
   PrepDoc,
   Stats,
@@ -91,10 +92,11 @@ export const api = {
   getStats: () => request<Stats>("/stats"),
   // the exposure-confirmation queue ("we think you know this — do you?")
   getConfirmQueue: () => request<{ candidates: ConfirmCandidate[] }>("/confirm"),
-  // answer one: known:true promotes it, known:false snoozes it
-  confirmWord: (lemma: string, known: boolean) =>
-    request<{ lemma: string; known: boolean; status: string | null }>(
-      "/confirm", { method: "POST", body: JSON.stringify({ lemma, known }) }),
+  // answer one: known:true promotes it, known:false snoozes it. The key is
+  // typed (word lemma / phrase headword / grammar pattern) — GRAMMAR.md.
+  confirmWord: (kind: ItemKind, key: string, known: boolean) =>
+    request<{ kind: ItemKind; key: string; known: boolean; status: string | null }>(
+      "/confirm", { method: "POST", body: JSON.stringify({ kind, key, known }) }),
   // shelve a watched episode into the passive-listening collection (or pull
   // it back out) — server-side flag only, artifacts stay put
   setPassive: (id: string, passive: boolean) =>

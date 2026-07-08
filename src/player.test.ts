@@ -346,6 +346,11 @@ describe("playerView subtitle overlay", () => {
           { s: "犬", l: "犬", r: "いぬ", c: true, k: true, f: 40 },
           { s: "が", c: false },
         ],
+        grammar: [
+          { pattern: "〜てしまう", note: "行っちゃった = 行く+てしまう" },
+          { pattern: "ら抜き言葉", note: "見られる→見れる", proposed: true },
+        ],
+        phrases: [{ canonical: "気を付ける", surface: "気を付けて" }],
       },
       {
         idx: 1,
@@ -400,6 +405,26 @@ describe("playerView subtitle overlay", () => {
     expect(w.classList.contains("tap-k")).toBe(true);
     mark.click();
     expect(getTaps(EP)["犬"]).toBe("h");
+    root.remove();
+  });
+
+  it("popup shows the line's curated grammar/phrase context on any word tap", async () => {
+    const { root, video } = await mount();
+    video.dispatchEvent(new Event("timeupdate")); // first cue — the annotated line
+    root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma]")!.click();
+    const pop = root.querySelector<HTMLElement>(".gloss-pop")!;
+    const notes = [...pop.querySelectorAll(".gp-line-note")].map((n) => n.textContent);
+    expect(notes).toEqual([
+      "grammar〜てしまう — 行っちゃった = 行く+てしまう",
+      "grammar?ら抜き言葉 — 見られる→見れる", // proposed pattern
+      "phrase気を付ける — here: 気を付けて",
+    ]);
+
+    // the un-annotated line shows none
+    Object.defineProperty(video, "currentTime", { value: 2.5, configurable: true });
+    video.dispatchEvent(new Event("timeupdate"));
+    root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma='公園']")!.click();
+    expect(pop.querySelectorAll(".gp-line-note").length).toBe(0);
     root.remove();
   });
 

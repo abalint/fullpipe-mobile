@@ -1,11 +1,14 @@
-// Confirm-words queue: the human checkpoint that replaced silent exposure→known
-// promotion. The ledger surfaces words whose watched exposures cleared the
-// frequency-scaled bar; you answer "I know it" (→ known) or "Not yet" (→ stays
-// learning, snoozed until more exposures). Server-backed; needs a connection.
+// Confirm queue: the human checkpoint that replaced silent exposure→known
+// promotion. The ledger surfaces items — words, phrases, grammar points —
+// whose watched exposures cleared their bar; you answer "I know it" (→ known)
+// or "Not yet" (→ stays learning, snoozed until more exposures).
+// Server-backed; needs a connection.
 
 import { api, ApiError } from "../api";
 import { rubyWord, segsNode } from "../prep-render";
 import type { ConfirmCandidate, DictEntry } from "../types";
+
+const JLPT: Record<number, string> = { 5: "N5", 4: "N4", 3: "N3", 2: "N2", 1: "N1" };
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
   const n = document.createElement(tag);
@@ -21,20 +24,29 @@ function glossText(senses?: DictEntry[]): string {
 }
 
 function candidateCard(c: ConfirmCandidate, onDone: (known: boolean) => void): HTMLElement {
+  const kind = c.kind ?? "word";
   const card = el("div", "confirm-card");
 
   const head = el("div", "cc-head");
   const word = el("span", "cc-word");
-  // furigana over the kanji only — reading_segs is pre-split on the PC; fall
-  // back to whole-word ruby for old servers that don't send it
-  if (c.reading_segs?.length) word.appendChild(segsNode(c.reading_segs));
-  else word.appendChild(rubyWord(c.lemma, c.reading));
+  if (kind === "grammar") {
+    // grammar pattern: no ruby — the key is the pattern string itself
+    word.textContent = c.pattern ?? c.lemma;
+  } else {
+    // furigana over the kanji only — reading_segs is pre-split on the PC; fall
+    // back to whole-word ruby for old servers that don't send it
+    if (c.reading_segs?.length) word.appendChild(segsNode(c.reading_segs));
+    else word.appendChild(rubyWord(c.lemma, c.reading));
+  }
   head.appendChild(word);
+  if (kind === "grammar" && c.level != null)
+    head.appendChild(el("span", "cc-badge", JLPT[c.level] ?? `L${c.level}`));
+  else if (kind === "phrase") head.appendChild(el("span", "cc-badge", "phrase"));
   const seen = c.episode_spread === 1 ? "1 episode" : `${c.episode_spread} episodes`;
   head.appendChild(el("span", "cc-seen", `seen in ${seen}`));
   card.appendChild(head);
 
-  const gloss = glossText(c.senses);
+  const gloss = kind === "grammar" ? (c.gloss ?? "") : glossText(c.senses);
   if (gloss) card.appendChild(el("div", "cc-gloss", gloss));
   if (c.episodes?.length)
     card.appendChild(el("div", "cc-eps", c.episodes.slice(0, 3).join(" · ")));
@@ -45,7 +57,7 @@ function candidateCard(c: ConfirmCandidate, onDone: (known: boolean) => void): H
   const answer = async (known: boolean) => {
     yes.disabled = no.disabled = true;
     try {
-      await api.confirmWord(c.lemma, known);
+      await api.confirmWord(kind, c.lemma, known);
       onDone(known);
     } catch (e) {
       yes.disabled = no.disabled = false;
@@ -61,12 +73,13 @@ function candidateCard(c: ConfirmCandidate, onDone: (known: boolean) => void): H
 
 export function confirmView(): HTMLElement {
   const root = el("div", "view");
-  root.appendChild(el("h1", "", "Confirm words"));
+  root.appendChild(el("h1", "", "Confirm"));
   root.appendChild(el(
     "div", "muted",
-    "You've met these enough while watching that we think you know them. " +
-    "Confirm the ones you do — that's what counts them as known. " +
-    "“Not yet” keeps a word in learning and stops asking until you see it more.",
+    "You've met these — words, phrases, grammar — enough while watching that " +
+    "we think you know them. Confirm the ones you do — that's what counts " +
+    "them as known. “Not yet” keeps one in learning and stops asking until " +
+    "you see it more.",
   ));
   const status = el("div", "status", "loading…");
   const list = el("div");
@@ -86,7 +99,7 @@ export function confirmView(): HTMLElement {
       const { candidates } = await api.getConfirmQueue();
       remaining = candidates.length;
       status.textContent = remaining
-        ? `${remaining} word${remaining > 1 ? "s" : ""} to confirm`
+        ? `${remaining} item${remaining > 1 ? "s" : ""} to confirm`
         : "All caught up — nothing to confirm.";
       for (const c of candidates) {
         const card = candidateCard(c, (known) => done(card, known));

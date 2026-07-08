@@ -322,7 +322,7 @@ describe("statsView", () => {
     const banner = root.querySelector<HTMLAnchorElement>("a.confirm-banner");
     expect(banner).not.toBeNull();
     expect(banner!.getAttribute("href")).toBe("#/confirm");
-    expect(banner!.textContent).toContain("3 words");
+    expect(banner!.textContent).toContain("3 items");
     root.remove();
     vi.restoreAllMocks();
   });
@@ -356,7 +356,7 @@ describe("confirmView", () => {
     document.body.appendChild(root);
     await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(2));
     expect(root.textContent).toContain("to go"); // JMdict gloss shown
-    expect(root.querySelector(".status")!.textContent).toContain("2 words");
+    expect(root.querySelector(".status")!.textContent).toContain("2 items");
     // furigana lands on the kanji only: 行 is inside a <ruby> with rt い, and
     // the okurigana く is a bare text node (no ruby over it)
     const firstWord = root.querySelector(".cc-word")!;
@@ -371,14 +371,43 @@ describe("confirmView", () => {
   it("removes a card once answered and counts down", async () => {
     vi.spyOn(api, "getConfirmQueue").mockResolvedValue({ candidates: cands });
     const confirm = vi.spyOn(api, "confirmWord").mockResolvedValue({
-      lemma: "行く", known: true, status: "known" });
+      kind: "word", key: "行く", known: true, status: "known" });
     const root = confirmView();
     document.body.appendChild(root);
     await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(2));
     root.querySelector<HTMLButtonElement>(".confirm-card .primary")!.click();
     await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(1));
-    expect(confirm).toHaveBeenCalledWith("行く", true);
+    expect(confirm).toHaveBeenCalledWith("word", "行く", true);
     expect(root.querySelector(".status")!.textContent).toContain("1 left");
+    root.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("renders typed phrase and grammar cards (GRAMMAR.md)", async () => {
+    const typed: ConfirmCandidate[] = [
+      { lemma: "気を付ける", kind: "phrase", reading: "きをつける",
+        reading_segs: [["気", "き"], ["を", null], ["付", "つ"], ["ける", null]],
+        exposure_count: 6, episode_spread: 4, episodes: ["Ep A"],
+        senses: [{ k: ["気を付ける"], r: ["きをつける"],
+                   s: [{ pos: ["exp"], g: ["to be careful"] }] }] },
+      { lemma: "〜てしまう", kind: "grammar", pattern: "〜てしまう", level: 4,
+        gloss: "completion or regret", exposure_count: 3, episode_spread: 3,
+        episodes: ["Ep B"] },
+    ];
+    vi.spyOn(api, "getConfirmQueue").mockResolvedValue({ candidates: typed });
+    const confirm = vi.spyOn(api, "confirmWord").mockResolvedValue({
+      kind: "grammar", key: "〜てしまう", known: true, status: "known" });
+    const root = confirmView();
+    document.body.appendChild(root);
+    await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(2));
+    const badges = [...root.querySelectorAll(".cc-badge")].map((b) => b.textContent);
+    expect(badges).toEqual(["phrase", "N4"]);
+    expect(root.textContent).toContain("to be careful"); // phrase JMdict gloss
+    expect(root.textContent).toContain("completion or regret"); // taxonomy gloss
+    // answering the grammar card sends the typed key
+    const grammarCard = root.querySelectorAll(".confirm-card")[1]!;
+    grammarCard.querySelector<HTMLButtonElement>(".primary")!.click();
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalledWith("grammar", "〜てしまう", true));
     root.remove();
     vi.restoreAllMocks();
   });

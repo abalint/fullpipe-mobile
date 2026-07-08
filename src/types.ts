@@ -50,6 +50,19 @@ export interface Sentence {
   tokens: Token[];
 }
 
+/** A curated grammar-pattern usage on one sentence (GRAMMAR.md). */
+export interface SentenceGrammar {
+  pattern: string;
+  note?: string; // curate form_note (or a proposal's gloss)
+  proposed?: boolean; // novel pattern awaiting taxonomy review
+}
+
+/** A curated multi-word expression on one sentence (GRAMMAR.md). */
+export interface SentencePhrase {
+  canonical: string; // JMdict headword
+  surface?: string; // as it appears in the line
+}
+
 /** One subtitle cue for the player: a prep-shaped sentence with timing. */
 export interface TranscriptSentence {
   idx: number;
@@ -57,6 +70,8 @@ export interface TranscriptSentence {
   end: number;
   cls?: string; // coverage classification (i_plus_1/…) — absent on old sidecars
   tokens: Token[];
+  grammar?: SentenceGrammar[]; // curated line context — absent until curation
+  phrases?: SentencePhrase[];
 }
 
 /** GET /transcript/{id} — every sentence, unlike prep's i+1 subset. */
@@ -123,7 +138,11 @@ export interface FreqBand {
   total: number;
 }
 
-/** GET /stats — the Progress tab's ledger dashboard. */
+/** The three tracked item kinds (GRAMMAR.md — one ledger, three item kinds). */
+export type ItemKind = "word" | "phrase" | "grammar";
+
+/** GET /stats — the Progress tab's ledger dashboard. `known`/`learning` and
+    the freq bands stay words-only; phrases/grammar ride as sibling counts. */
 export interface Stats {
   known: number;
   learning: number;
@@ -131,17 +150,27 @@ export interface Stats {
   episodes_total: number;
   cards_minted: number;
   needs_review: number;
-  confirm_candidates: number; // words the ledger wants you to confirm you know
+  confirm_candidates: number; // items to confirm, ALL kinds (banner count)
   words_encountered: number; // distinct lemmas ever exposed
   want_to_learn: number; // standing high-interest set not yet known
   freq_bands: FreqBand[];
   evidence_by_source: Record<string, number>;
+  // sibling axes — absent on pre-grammar servers
+  phrases_known?: number;
+  phrases_learning?: number;
+  phrases_confirm_candidates?: number;
+  grammar_known?: number;
+  grammar_learning?: number;
+  grammar_confirm_candidates?: number;
+  grammar_proposed?: number;
 }
 
-/** One row in the confirm queue: a word whose watched exposures cleared the
-    bar, awaiting a human "do you know this?" (GET /confirm). */
+/** One row in the confirm queue: an item whose watched exposures cleared the
+    bar, awaiting a human "do you know this?" (GET /confirm). `lemma` is the
+    typed key (word lemma / phrase headword / grammar pattern). */
 export interface ConfirmCandidate {
   lemma: string;
+  kind?: ItemKind; // absent on pre-grammar servers ⇒ word
   reading?: string | null;
   reading_segs?: Segs; // furigana over kanji only ([surface, reading|null] pairs)
   pos?: string | null;
@@ -149,7 +178,11 @@ export interface ConfirmCandidate {
   exposure_count: number;
   episode_spread: number;
   episodes: string[]; // watched-episode titles it turned up in
-  senses?: DictEntry[]; // JMdict glosses, when jmdict.db exists server-side
+  senses?: DictEntry[]; // JMdict glosses (word/phrase), when jmdict.db exists
+  // grammar rows only:
+  pattern?: string;
+  level?: number | null; // JLPT tier 5=N5 … 1=N1
+  gloss?: string | null;
 }
 
 /** "k" = I know this (ledger evidence) · "h" = high interest (card priority).

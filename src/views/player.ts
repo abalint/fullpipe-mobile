@@ -36,7 +36,16 @@ import {
   loadLocalTranscript,
   savePosition,
 } from "../video";
-import type { Definitions, GlossEntry, PrepDoc, Segs, TapMark, Token } from "../types";
+import type {
+  Definitions,
+  GlossEntry,
+  PrepDoc,
+  Segs,
+  SentenceGrammar,
+  SentencePhrase,
+  TapMark,
+  Token,
+} from "../types";
 
 /** One subtitle cue: tokenized (tappable) or plain text (SRT fallback). */
 export interface Cue {
@@ -48,6 +57,8 @@ export interface Cue {
   cls?: string; // coverage classification (i_plus_1/…) — absent on old sidecars
   tokens?: Token[];
   text?: string;
+  grammar?: SentenceGrammar[]; // curated line context (GRAMMAR.md)
+  phrases?: SentencePhrase[];
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -695,7 +706,25 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       }
       pop.appendChild(d);
     }
-    if (!info && !entries.length)
+    // the line's curated grammar patterns + phrases (GRAMMAR.md) — they
+    // belong to the sentence, not one token, so any word tap surfaces them
+    const cue = cues[current];
+    for (const g of cue?.grammar ?? []) {
+      const row = el("div", "gp-line-note");
+      row.appendChild(el("span", "gp-tag", g.proposed ? "grammar?" : "grammar"));
+      row.appendChild(el("span", "gp-pattern", g.pattern));
+      if (g.note) row.appendChild(document.createTextNode(` — ${g.note}`));
+      pop.appendChild(row);
+    }
+    for (const p of cue?.phrases ?? []) {
+      const row = el("div", "gp-line-note");
+      row.appendChild(el("span", "gp-tag", "phrase"));
+      row.appendChild(el("span", "gp-pattern", p.canonical));
+      if (p.surface && p.surface !== p.canonical)
+        row.appendChild(document.createTextNode(` — here: ${p.surface}`));
+      pop.appendChild(row);
+    }
+    if (!info && !entries.length && !cue?.grammar?.length && !cue?.phrases?.length)
       pop.appendChild(el("div", "gp-none", "no dictionary entry"));
     pop.style.display = "";
   };

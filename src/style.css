@@ -248,6 +248,10 @@ input {
 .confirm-card .cc-word ruby rt { font-size: .4em; color: var(--muted); }
 .confirm-card .cc-seen { margin-left: auto; color: var(--muted); font-size: .78rem;
                          white-space: nowrap; }
+/* kind badge: JLPT tier on a grammar card, "phrase" on a phrase card */
+.confirm-card .cc-badge { color: var(--accent); border: 1px solid var(--accent);
+                          border-radius: 6px; padding: 0 6px; font-size: .72rem;
+                          white-space: nowrap; align-self: center; }
 .confirm-card .cc-gloss { color: var(--fg); font-size: .9rem; margin-top: 4px; }
 .confirm-card .cc-eps { color: var(--muted); font-size: .76rem; margin-top: 3px;
                         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -351,6 +355,12 @@ input {
                      text-transform: lowercase; }
 .gloss-pop .gp-sense { color: #e8e8e8; }
 .gloss-pop .gp-none { color: #999; font-style: italic; }
+/* the line's curated grammar/phrase context ("grammar?" = proposed pattern) */
+.gloss-pop .gp-line-note { color: #cfcfcf; font-size: .88rem; margin-top: 4px;
+                           border-top: 1px solid #333; padding-top: 4px; }
+.gloss-pop .gp-tag { color: #c9a7ff; font-size: .72rem; margin-right: 6px;
+                     text-transform: lowercase; }
+.gloss-pop .gp-pattern { color: #e8d5ff; font-weight: 600; }
 
 .player-controls { display: flex; flex-direction: column; gap: 4px; }
 .player-controls .row { display: flex; gap: 6px; align-items: center; }

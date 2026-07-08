@@ -29,13 +29,14 @@ function pct(known: number, total: number): number {
 }
 
 function renderStats(root: HTMLElement, s: Stats): void {
-  // confirm-words banner: words the ledger wants you to confirm you know
+  // confirm banner: items (words + phrases + grammar) awaiting a "do you
+  // know this?" — the count is the all-kinds total from the server
   if (s.confirm_candidates > 0) {
     const n = s.confirm_candidates;
     const banner = el("a", "confirm-banner") as HTMLAnchorElement;
     banner.href = "#/confirm";
     banner.appendChild(el("span", "cb-text",
-      `🧠 ${n} word${n > 1 ? "s" : ""} to confirm you know`));
+      `🧠 ${n} item${n > 1 ? "s" : ""} to confirm you know`));
     banner.appendChild(el("span", "cb-go", "Review →"));
     root.appendChild(banner);
   }
@@ -87,6 +88,22 @@ function renderStats(root: HTMLElement, s: Stats): void {
   line("Distinct words encountered", s.words_encountered);
   line("Words you want to learn", s.want_to_learn);
   root.appendChild(kv);
+
+  // phrases + grammar — the two sibling tracked axes (GRAMMAR.md). Hidden
+  // entirely on pre-grammar servers / before anything is tracked.
+  const phrasesTracked = (s.phrases_known ?? 0) + (s.phrases_learning ?? 0);
+  const grammarTracked = (s.grammar_known ?? 0) + (s.grammar_learning ?? 0);
+  if (phrasesTracked || grammarTracked) {
+    root.appendChild(el("h2", "", "Phrases & grammar"));
+    const grid2 = el("div", "stat-grid");
+    if (phrasesTracked)
+      grid2.appendChild(tile(nf.format(s.phrases_known ?? 0), "phrases known",
+        `+${nf.format(s.phrases_learning ?? 0)} learning`, "know"));
+    if (grammarTracked)
+      grid2.appendChild(tile(nf.format(s.grammar_known ?? 0), "grammar points known",
+        `+${nf.format(s.grammar_learning ?? 0)} learning`, "know"));
+    root.appendChild(grid2);
+  }
 
   // evidence provenance — where the known-set came from
   const src = s.evidence_by_source;
