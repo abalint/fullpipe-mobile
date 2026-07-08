@@ -131,10 +131,24 @@ export interface Stats {
   episodes_total: number;
   cards_minted: number;
   needs_review: number;
+  confirm_candidates: number; // words the ledger wants you to confirm you know
   words_encountered: number; // distinct lemmas ever exposed
   want_to_learn: number; // standing high-interest set not yet known
   freq_bands: FreqBand[];
   evidence_by_source: Record<string, number>;
+}
+
+/** One row in the confirm queue: a word whose watched exposures cleared the
+    bar, awaiting a human "do you know this?" (GET /confirm). */
+export interface ConfirmCandidate {
+  lemma: string;
+  reading?: string | null;
+  pos?: string | null;
+  freq_rank?: number | null;
+  exposure_count: number;
+  episode_spread: number;
+  episodes: string[]; // watched-episode titles it turned up in
+  senses?: DictEntry[]; // JMdict glosses, when jmdict.db exists server-side
 }
 
 /** "k" = I know this (ledger evidence) · "h" = high interest (card priority).

@@ -1,7 +1,15 @@
 // Thin client for the fullPipe sync server (MOBILE.md "Server API" table).
 // Plain HTTP inside the tailnet; bearer token as belt-and-suspenders.
 
-import type { Definitions, Job, PrepDoc, Stats, TapBatch, TranscriptDoc } from "./types";
+import type {
+  ConfirmCandidate,
+  Definitions,
+  Job,
+  PrepDoc,
+  Stats,
+  TapBatch,
+  TranscriptDoc,
+} from "./types";
 import { getSettings } from "./store";
 
 export class ApiError extends Error {
@@ -81,6 +89,12 @@ export const api = {
     request<Job>(`/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }),
   // progress dashboard (known counts, freq-band coverage) for the Stats tab
   getStats: () => request<Stats>("/stats"),
+  // the exposure-confirmation queue ("we think you know this — do you?")
+  getConfirmQueue: () => request<{ candidates: ConfirmCandidate[] }>("/confirm"),
+  // answer one: known:true promotes it, known:false snoozes it
+  confirmWord: (lemma: string, known: boolean) =>
+    request<{ lemma: string; known: boolean; status: string | null }>(
+      "/confirm", { method: "POST", body: JSON.stringify({ lemma, known }) }),
   // shelve a watched episode into the passive-listening collection (or pull
   // it back out) — server-side flag only, artifacts stay put
   setPassive: (id: string, passive: boolean) =>

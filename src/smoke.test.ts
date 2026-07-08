@@ -26,8 +26,9 @@ import { flushOutbox } from "./sync";
 import { api, ApiError } from "./api";
 import { hms, sortJobs, starBar } from "./views/queue";
 import { statsView } from "./views/stats";
+import { confirmView } from "./views/confirm";
 import { cacheStats } from "./store";
-import type { Job, Stats } from "./types";
+import type { ConfirmCandidate, Job, Stats } from "./types";
 
 const doc = demo as unknown as PrepDoc;
 const ep = doc.episode.id;
@@ -297,8 +298,8 @@ describe("starBar", () => {
 describe("statsView", () => {
   const stats: Stats = {
     known: 3442, learning: 218, episodes_watched: 27, episodes_total: 46,
-    cards_minted: 240, needs_review: 0, words_encountered: 10389,
-    want_to_learn: 49,
+    cards_minted: 240, needs_review: 0, confirm_candidates: 3,
+    words_encountered: 10389, want_to_learn: 49,
     freq_bands: [
       { band: 1000, known: 948, total: 1000 },
       { band: 2000, known: 1344, total: 2000 },
@@ -317,6 +318,11 @@ describe("statsView", () => {
     const fills = root.querySelectorAll<HTMLElement>(".freqfill");
     expect(fills.length).toBe(2);
     expect(fills[0].style.width).toBe("95%");
+    // confirm-words banner links to the confirm queue
+    const banner = root.querySelector<HTMLAnchorElement>("a.confirm-banner");
+    expect(banner).not.toBeNull();
+    expect(banner!.getAttribute("href")).toBe("#/confirm");
+    expect(banner!.textContent).toContain("3 words");
     root.remove();
     vi.restoreAllMocks();
   });
@@ -330,6 +336,42 @@ describe("statsView", () => {
     expect(root.querySelectorAll(".stat-tile").length).toBe(4);
     await vi.waitFor(() =>
       expect(root.querySelector(".status")!.textContent).toMatch(/offline/));
+    root.remove();
+    vi.restoreAllMocks();
+  });
+});
+
+describe("confirmView", () => {
+  const cands: ConfirmCandidate[] = [
+    { lemma: "行く", reading: "いく", freq_rank: 0, exposure_count: 24,
+      episode_spread: 24, episodes: ["Ep A", "Ep B"],
+      senses: [{ k: ["行く"], r: ["いく"], s: [{ pos: ["v5k-s"], g: ["to go"] }] }] },
+    { lemma: "来る", reading: "くる", freq_rank: 4, exposure_count: 24,
+      episode_spread: 24, episodes: [] },
+  ];
+
+  it("renders a card per candidate with a gloss and answer buttons", async () => {
+    vi.spyOn(api, "getConfirmQueue").mockResolvedValue({ candidates: cands });
+    const root = confirmView();
+    document.body.appendChild(root);
+    await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(2));
+    expect(root.textContent).toContain("to go"); // JMdict gloss shown
+    expect(root.querySelector(".status")!.textContent).toContain("2 words");
+    root.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("removes a card once answered and counts down", async () => {
+    vi.spyOn(api, "getConfirmQueue").mockResolvedValue({ candidates: cands });
+    const confirm = vi.spyOn(api, "confirmWord").mockResolvedValue({
+      lemma: "行く", known: true, status: "known" });
+    const root = confirmView();
+    document.body.appendChild(root);
+    await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(2));
+    root.querySelector<HTMLButtonElement>(".confirm-card .primary")!.click();
+    await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(1));
+    expect(confirm).toHaveBeenCalledWith("行く", true);
+    expect(root.querySelector(".status")!.textContent).toContain("1 left");
     root.remove();
     vi.restoreAllMocks();
   });

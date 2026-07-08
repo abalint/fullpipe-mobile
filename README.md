@@ -70,6 +70,12 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   top 1k/2k/5k/10k most common corpus words, how many are known), plus immersion
   and evidence-provenance counts. From `GET /stats` (ledger-sourced, so it reads
   with Anki closed); the last snapshot caches for an offline glance.
+- **Confirm words** (`#/confirm`, reached from a banner on Progress): the human
+  checkpoint that replaced silent exposure→known promotion. The ledger surfaces
+  words you've met enough while watching (`GET /confirm`, with JMdict glosses +
+  the episodes they appeared in); you answer **✓ I know it** (`POST /confirm`
+  known → the word counts as known) or **Not yet** (stays learning, snoozed
+  until more exposures). Server-backed.
 - **Retry a failed job:** a `failed` Stage-1 row now carries a `↻ retry` button
   (`POST /jobs/{id}/retry` re-queues it) instead of forcing a delete-and-repaste.
   Jobs stranded mid-flight by a server restart are reclaimed automatically

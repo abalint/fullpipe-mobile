@@ -230,6 +230,30 @@ input {
 .freqfill { height: 100%; background: var(--know); border-radius: 6px;
             transition: width .3s ease; }
 
+/* confirm-words banner on the Progress tab → the confirm queue */
+.confirm-banner {
+  display: flex; align-items: center; gap: 10px; text-decoration: none;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 12px; padding: 12px 14px; margin-bottom: 14px;
+}
+.confirm-banner .cb-text { flex: 1; color: var(--fg); font-weight: 600; }
+.confirm-banner .cb-go { color: var(--accent); font-size: .85rem; white-space: nowrap; }
+
+/* one card in the confirm queue */
+.confirm-card { background: var(--card); border-radius: 12px; padding: 12px 14px;
+                margin-bottom: 10px; }
+.confirm-card .cc-head { display: flex; align-items: baseline; gap: 10px; }
+.confirm-card .cc-word { font-size: 1.4rem; }
+.confirm-card .cc-word ruby rt { font-size: .4em; color: var(--muted); }
+.confirm-card .cc-seen { margin-left: auto; color: var(--muted); font-size: .78rem;
+                         white-space: nowrap; }
+.confirm-card .cc-gloss { color: var(--fg); font-size: .9rem; margin-top: 4px; }
+.confirm-card .cc-eps { color: var(--muted); font-size: .76rem; margin-top: 3px;
+                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.confirm-card .cc-actions { display: flex; gap: 8px; margin-top: 10px; }
+.confirm-card .cc-actions button { flex: 1; }
+
 /* small key/value list for the evidence breakdown */
 .kv { display: grid; grid-template-columns: 1fr max-content; gap: 4px 14px;
       font-size: .85rem; }

@@ -29,6 +29,17 @@ function pct(known: number, total: number): number {
 }
 
 function renderStats(root: HTMLElement, s: Stats): void {
+  // confirm-words banner: words the ledger wants you to confirm you know
+  if (s.confirm_candidates > 0) {
+    const n = s.confirm_candidates;
+    const banner = el("a", "confirm-banner") as HTMLAnchorElement;
+    banner.href = "#/confirm";
+    banner.appendChild(el("span", "cb-text",
+      `🧠 ${n} word${n > 1 ? "s" : ""} to confirm you know`));
+    banner.appendChild(el("span", "cb-go", "Review →"));
+    root.appendChild(banner);
+  }
+
   // headline tiles
   const grid = el("div", "stat-grid");
   const top1k = s.freq_bands.find((b) => b.band === 1000);
