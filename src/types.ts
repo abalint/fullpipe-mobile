@@ -115,6 +115,28 @@ export interface PrepDoc {
   sentences_by_idx: Record<string, Sentence>;
 }
 
+/** One frequency band in the Stats view: of the `total` most common corpus
+    lemmas (show-penetration rank), how many are known. */
+export interface FreqBand {
+  band: number;
+  known: number;
+  total: number;
+}
+
+/** GET /stats — the Progress tab's ledger dashboard. */
+export interface Stats {
+  known: number;
+  learning: number;
+  episodes_watched: number;
+  episodes_total: number;
+  cards_minted: number;
+  needs_review: number;
+  words_encountered: number; // distinct lemmas ever exposed
+  want_to_learn: number; // standing high-interest set not yet known
+  freq_bands: FreqBand[];
+  evidence_by_source: Record<string, number>;
+}
+
 /** "k" = I know this (ledger evidence) · "h" = high interest (card priority).
     Unknown needs no mark — candidates are presumed unknown. */
 export type TapMark = "k" | "h";

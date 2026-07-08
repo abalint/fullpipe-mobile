@@ -207,6 +207,35 @@ input {
 .bar-status { font-size: .85rem; }
 .bar-status:empty { display: none; }
 
+/* --- Progress / Stats tab ----------------------------------------------------
+   Headline tiles over frequency-band coverage bars. Ledger-sourced, so it
+   works with Anki closed; cached for an offline read. */
+.stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.stat-tile { background: var(--card); border-radius: 12px; padding: 14px 16px; }
+.stat-tile .num { font-size: 1.7rem; font-weight: 700; line-height: 1.1;
+                  font-variant-numeric: tabular-nums; }
+.stat-tile .num.accent { color: var(--accent); }
+.stat-tile .num.know { color: var(--know); }
+.stat-tile .lab { font-size: .78rem; color: var(--muted); margin-top: 2px; }
+.stat-tile .sub { font-size: .72rem; color: var(--muted); margin-top: 3px; }
+
+/* one frequency band: "top 1,000" · a filled track · "948 · 95%" */
+.freqrow { margin-bottom: 12px; }
+.freqrow .freqhead { display: flex; justify-content: space-between;
+                     font-size: .82rem; margin-bottom: 4px; }
+.freqrow .freqhead .cap { color: var(--fg); }
+.freqrow .freqhead .val { color: var(--muted); font-variant-numeric: tabular-nums; }
+.freqtrack { height: 10px; border-radius: 6px; overflow: hidden;
+             background: color-mix(in srgb, var(--muted) 22%, transparent); }
+.freqfill { height: 100%; background: var(--know); border-radius: 6px;
+            transition: width .3s ease; }
+
+/* small key/value list for the evidence breakdown */
+.kv { display: grid; grid-template-columns: 1fr max-content; gap: 4px 14px;
+      font-size: .85rem; }
+.kv .k { color: var(--muted); }
+.kv .v { color: var(--fg); font-variant-numeric: tabular-nums; text-align: right; }
+
 /* --- in-app player ----------------------------------------------------------
    Stage (video + subtitle overlay) over a custom control bar; native controls
    are off so they can never sit on top of the tappable subs. */

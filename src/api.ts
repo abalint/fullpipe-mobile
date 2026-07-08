@@ -1,7 +1,7 @@
 // Thin client for the fullPipe sync server (MOBILE.md "Server API" table).
 // Plain HTTP inside the tailnet; bearer token as belt-and-suspenders.
 
-import type { Definitions, Job, PrepDoc, TapBatch, TranscriptDoc } from "./types";
+import type { Definitions, Job, PrepDoc, Stats, TapBatch, TranscriptDoc } from "./types";
 import { getSettings } from "./store";
 
 export class ApiError extends Error {
@@ -76,6 +76,11 @@ export const api = {
     request<Job>("/jobs", { method: "POST", body: JSON.stringify({ source }) }),
   curate: (id: string) =>
     request<Job>(`/jobs/${encodeURIComponent(id)}/curate`, { method: "POST" }),
+  // re-queue a failed Stage-1 job (the Retry button); the worker picks it up
+  retryJob: (id: string) =>
+    request<Job>(`/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+  // progress dashboard (known counts, freq-band coverage) for the Stats tab
+  getStats: () => request<Stats>("/stats"),
   // shelve a watched episode into the passive-listening collection (or pull
   // it back out) — server-side flag only, artifacts stay put
   setPassive: (id: string, passive: boolean) =>

@@ -16,13 +16,13 @@ so use the hostname, not a raw `100.x` IP.
 
 ```
 src/
-├── main.ts            app shell: hash router + bottom nav (Queue / Prep / Settings)
+├── main.ts            app shell: hash router + bottom nav (Queue / Listen / Progress / Prep / Settings)
 ├── api.ts             client for the MOBILE.md server API
-├── store.ts           settings · per-episode taps · outbox · prep-doc cache (localStorage)
+├── store.ts           settings · per-episode taps · outbox · prep-doc + stats cache (localStorage)
 ├── sync.ts            opportunistic outbox flush (start / online / visible)
 ├── prep-render.ts     prep-doc renderer (port of render/template.html)
 ├── share.ts           JS side of the share-sheet target
-├── views/             queue · prep · player · settings
+├── views/             queue · prep · player · stats · settings
 ├── demo-prep.json     fixture (from render/demo-prep.html) — Settings → "Load demo prep doc"
 └── smoke.test.ts      DOM smoke tests (vitest + happy-dom)
 ```
@@ -64,6 +64,17 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   `⇪ pending sync` chip, and a queued mark-watched shows as watched. Taps
   accumulate per episode in localStorage; **Submit** freezes them into a batch.
   "Copy blob" keeps the P9 copy-paste fallback.
+- **Progress tab** (`#/progress`): the payoff of the known-lemma ledger, made
+  visible — headline tiles (words known, % of the 1,000 most common words,
+  episodes watched, cards minted) over **frequency-band coverage bars** (of the
+  top 1k/2k/5k/10k most common corpus words, how many are known), plus immersion
+  and evidence-provenance counts. From `GET /stats` (ledger-sourced, so it reads
+  with Anki closed); the last snapshot caches for an offline glance.
+- **Retry a failed job:** a `failed` Stage-1 row now carries a `↻ retry` button
+  (`POST /jobs/{id}/retry` re-queues it) instead of forcing a delete-and-repaste.
+  Jobs stranded mid-flight by a server restart are reclaimed automatically
+  server-side (`jobqueue.reap_stale`) — a stranded card-push resurfaces as the
+  existing retry-cards path.
 - **Submit with no taps** calls `POST /watched/{id}` instead.
 - **Rating + tags:** stars on watched/staged queue rows and the post-watch prep
   bar. Once a star is set, the six taste tags appear (grouped liked/didn't, all

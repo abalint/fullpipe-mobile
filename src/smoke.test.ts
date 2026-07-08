@@ -25,7 +25,9 @@ import {
 import { flushOutbox } from "./sync";
 import { api, ApiError } from "./api";
 import { hms, sortJobs, starBar } from "./views/queue";
-import type { Job } from "./types";
+import { statsView } from "./views/stats";
+import { cacheStats } from "./store";
+import type { Job, Stats } from "./types";
 
 const doc = demo as unknown as PrepDoc;
 const ep = doc.episode.id;
@@ -289,6 +291,47 @@ describe("starBar", () => {
     expect(sent).toBe(5);
     stars[2].click(); // current rating → clear
     expect(sent).toBeNull();
+  });
+});
+
+describe("statsView", () => {
+  const stats: Stats = {
+    known: 3442, learning: 218, episodes_watched: 27, episodes_total: 46,
+    cards_minted: 240, needs_review: 0, words_encountered: 10389,
+    want_to_learn: 49,
+    freq_bands: [
+      { band: 1000, known: 948, total: 1000 },
+      { band: 2000, known: 1344, total: 2000 },
+    ],
+    evidence_by_source: { exposure: 26140, tap_known: 391 },
+  };
+
+  it("renders headline tiles and a coverage bar per band", async () => {
+    vi.spyOn(api, "getStats").mockResolvedValue(stats);
+    const root = statsView();
+    document.body.appendChild(root);
+    await vi.waitFor(() => expect(root.querySelectorAll(".stat-tile").length).toBe(4));
+    // top-1000 tile shows 95% (948/1000)
+    expect(root.textContent).toContain("95%");
+    // one coverage bar per frequency band, filled to the pct
+    const fills = root.querySelectorAll<HTMLElement>(".freqfill");
+    expect(fills.length).toBe(2);
+    expect(fills[0].style.width).toBe("95%");
+    root.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("falls back to the cached snapshot when the server is unreachable", async () => {
+    cacheStats(stats);
+    vi.spyOn(api, "getStats").mockRejectedValue(new ApiError("Server unreachable"));
+    const root = statsView();
+    document.body.appendChild(root);
+    // cached numbers paint immediately even though the fetch fails
+    expect(root.querySelectorAll(".stat-tile").length).toBe(4);
+    await vi.waitFor(() =>
+      expect(root.querySelector(".status")!.textContent).toMatch(/offline/));
+    root.remove();
+    vi.restoreAllMocks();
   });
 });
 

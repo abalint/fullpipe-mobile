@@ -369,6 +369,22 @@ function jobRow(
     });
     actions.appendChild(retry);
   }
+  // Stage 1 failed (download/transcribe/tokenize) — re-queue it. Without this
+  // a transient yt-dlp/network failure could only be cleared by deleting the
+  // row and re-pasting the URL.
+  if (!offline && job.state === "failed") {
+    const retry = el("button", "small", "↻ retry") as HTMLButtonElement;
+    retry.addEventListener("click", async () => {
+      retry.disabled = true;
+      try {
+        await api.retryJob(job.episode_id);
+      } catch (e) {
+        alert((e as Error).message);
+      }
+      rerender();
+    });
+    actions.appendChild(retry);
+  }
   if (!offline && job.state === "prepared") {
     const b = el("button", "small", "curate") as HTMLButtonElement;
     b.addEventListener("click", async () => {

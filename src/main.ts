@@ -7,6 +7,7 @@ import { passiveView } from "./views/passive";
 import { prepView } from "./views/prep";
 import { playerView } from "./views/player";
 import { settingsView } from "./views/settings";
+import { statsView } from "./views/stats";
 import { installAutoFlush } from "./sync";
 import { installShareTarget } from "./share";
 import { cachedPrepIds, getSettings } from "./store";
@@ -24,6 +25,7 @@ function route(): void {
   else if (view === "player" && arg)
     node = playerView(arg, arg2 !== undefined && arg2 !== "" ? Number(arg2) : undefined);
   else if (view === "listen") node = passiveView();
+  else if (view === "progress") node = statsView();
   else if (view === "settings") node = settingsView();
   else if (view === "prep") {
     // bare prep tab → most recently cached doc, else nudge to queue

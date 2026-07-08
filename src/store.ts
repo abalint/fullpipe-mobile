@@ -9,7 +9,7 @@
 // replay-safe server-side (batch_id / review_id dedup, idempotent
 // watched/enqueue), so a double-flush after a flaky connection is harmless.
 
-import type { Job, OutboxAction, PrepDoc, TapBatch, TapMark } from "./types";
+import type { Job, OutboxAction, PrepDoc, Stats, TapBatch, TapMark } from "./types";
 
 export interface Settings {
   serverUrl: string;
@@ -24,6 +24,7 @@ const K = {
   prep: (ep: string) => `fp.prep.${ep}`,
   prepIndex: "fp.prepIndex",
   jobs: "fp.jobsCache",
+  stats: "fp.statsCache",
 };
 
 function read<T>(key: string, fallback: T): T {
@@ -243,6 +244,16 @@ export function cacheJobs(jobs: Job[]): void {
 
 export function getCachedJobs(): { at: string; jobs: Job[] } | null {
   return read<{ at: string; jobs: Job[] } | null>(K.jobs, null);
+}
+
+// ---- stats snapshot (offline Progress screen) -----------------------------------
+
+export function cacheStats(stats: Stats): void {
+  write(K.stats, { at: new Date().toISOString(), stats });
+}
+
+export function getCachedStats(): { at: string; stats: Stats } | null {
+  return read<{ at: string; stats: Stats } | null>(K.stats, null);
 }
 
 // ---- prep-doc cache -------------------------------------------------------------
