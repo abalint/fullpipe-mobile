@@ -24,7 +24,13 @@ import {
   removeEpisodeActions,
 } from "../store";
 import { flushOutbox } from "../sync";
-import { deleteVideo, downloadVideo, getPosition, getVideoRecord } from "../video";
+import {
+  deleteVideo,
+  downloadVideo,
+  getPosition,
+  getVideoRecord,
+  refreshSidecars,
+} from "../video";
 import type { Job, JobState } from "../types";
 
 const STAGE1: JobState[] = ["downloading", "transcribing", "tokenizing"];
@@ -596,16 +602,25 @@ export function queueView(): HTMLElement {
   /** Pull prep docs for every curated episode in the background so "staged
       while online" implies "prep readable offline" — not only after a manual
       open. Skips docs that already carry their curation; refetches ones
-      cached back at `prepared` (pre-curation). */
+      cached back at `prepared` (pre-curation). Downloaded videos get the same
+      treatment: transcript/definitions sidecars fetched at `prepared` lack
+      the curate pass (grammar/phrase notes, curate-authored defs), so refresh
+      them once the episode is staged. */
   async function cacheStagedPreps(): Promise<boolean> {
     let fetched = false;
     for (const j of jobs) {
       if (!STAGED_UNWATCHED.includes(j.state)) continue;
       const cached = getCachedPrep(j.episode_id);
-      if (cached?.curate) continue;
+      if (!cached?.curate) {
+        try {
+          cachePrep(await api.getPrep(j.episode_id));
+          fetched = true;
+        } catch {
+          /* best-effort — next queue load retries */
+        }
+      }
       try {
-        cachePrep(await api.getPrep(j.episode_id));
-        fetched = true;
+        if (await refreshSidecars(j.episode_id)) fetched = true;
       } catch {
         /* best-effort — next queue load retries */
       }

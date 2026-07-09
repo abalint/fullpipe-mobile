@@ -1,9 +1,9 @@
 // Episode video: download-then-play (MOBILE.md decoupled pulls — manual
 // trigger for now, WorkManager later). Files land in app-internal storage
 // (videos/<episode>.mp4 + .srt sidecar) and play in the in-app player.
-// Deleted at mark-watched — unless the episode is shelved for passive
-// listening ("keep to listen"), which pins the file so its audio plays
-// straight off the device.
+// Retained after mark-watched (for rewatch + passive listening) — deletion is
+// manual only: swipe-delete on a queue/Listen row (deleteVideo), never
+// automatic at close-out.
 
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { api } from "./api";
@@ -15,6 +15,8 @@ export interface VideoRecord {
   subsPath?: string;
   transcriptPath?: string; // tokenized sentence track (absent on old records)
   defsPath?: string; // per-episode JMdict definitions (absent on old records)
+  curated?: boolean; // sidecars carry the curate pass (grammar/phrases/defs);
+  // false/absent → refreshSidecars retries once curation lands
   size: number;
   at: string;
 }
@@ -151,6 +153,9 @@ export async function downloadVideo(
       subsPath,
       transcriptPath,
       defsPath,
+      curated: transcriptPath
+        ? ((await readLocalJson<TranscriptDoc>(transcriptPath))?.curated ?? false)
+        : false,
       size: stat.size,
       at: new Date().toISOString(),
     };
@@ -159,6 +164,63 @@ export async function downloadVideo(
   } finally {
     void listener?.remove();
   }
+}
+
+/** Re-download the transcript + definitions sidecars. Videos are usually
+    downloaded at `prepared`, before /immerse has curated — so the sidecars
+    lack grammar/phrase notes and the curate-authored definitions until this
+    runs. Called once curation lands (queue refresh / player open); a no-op
+    when the record is already curated. Returns the fresh transcript, or null
+    when nothing was refreshed (no record, offline, still uncurated). */
+export async function refreshSidecars(ep: string): Promise<TranscriptDoc | null> {
+  const rec = getVideoRecord(ep);
+  if (!rec || rec.curated) return null;
+  const { token } = getSettings();
+  const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+  // stage into .fresh then swap, so a failed download can't truncate the
+  // sidecar the player is falling back on
+  const tPath = `videos/${ep}.transcript.json`;
+  try {
+    await Filesystem.downloadFile({
+      url: api.transcriptUrl(ep),
+      headers,
+      path: `${tPath}.fresh`,
+      directory: Directory.Data,
+      recursive: true,
+    });
+  } catch {
+    return null; // offline / purged server-side — retry on a later trigger
+  }
+  const doc = await readLocalJson<TranscriptDoc>(`${tPath}.fresh`);
+  if (!doc?.sentences?.length) return null;
+  await Filesystem.rename({
+    from: `${tPath}.fresh`,
+    to: tPath,
+    directory: Directory.Data,
+    toDirectory: Directory.Data,
+  });
+  const dPath = `videos/${ep}.definitions.json`;
+  try {
+    await Filesystem.downloadFile({
+      url: api.definitionsUrl(ep),
+      headers,
+      path: dPath,
+      directory: Directory.Data,
+      recursive: true,
+    });
+  } catch {
+    /* definitions are best-effort, same as at download time */
+  }
+  localStorage.setItem(
+    key(ep),
+    JSON.stringify({
+      ...rec,
+      transcriptPath: tPath,
+      defsPath: dPath,
+      curated: doc.curated ?? false,
+    }),
+  );
+  return doc;
 }
 
 export async function deleteVideo(ep: string): Promise<void> {

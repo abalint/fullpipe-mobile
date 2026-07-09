@@ -77,6 +77,9 @@ export interface TranscriptSentence {
 /** GET /transcript/{id} — every sentence, unlike prep's i+1 subset. */
 export interface TranscriptDoc {
   episode_id: string;
+  /** The curate pass has run: grammar/phrase notes (and curate-authored
+      definitions) are included. Absent/false → sidecar refresh will retry. */
+  curated?: boolean;
   candidates?: string[]; // ranked high-value lemmas (absent on old sidecars)
   sentences: TranscriptSentence[];
 }
@@ -90,6 +93,7 @@ export interface DictEntry {
   k: string[]; // kanji forms
   r: string[]; // readings
   s: DictSense[];
+  ai?: boolean; // curate-authored (no JMdict entry existed), not EDRDG
 }
 
 /** GET /definitions/{id} — lemma → JMdict entries for the episode's words. */

@@ -34,6 +34,7 @@ import {
   getVideoRecord,
   loadLocalDefinitions,
   loadLocalTranscript,
+  refreshSidecars,
   savePosition,
 } from "../video";
 import type {
@@ -376,17 +377,23 @@ function fmtClock(sec: number): string {
 }
 
 /** Tokenized cues + ranked high-value lemmas for the episode: local sidecar →
-    server → null (SRT era). `candidates` is empty on old sidecars. */
+    server → null (SRT era). `candidates` is empty on old sidecars; `curated`
+    false means the sidecar predates curation (no grammar/phrase notes yet) —
+    the player then tries a background refresh. */
 async function loadTokenCues(
   ep: string,
-): Promise<{ cues: Cue[]; candidates: string[] } | null> {
+): Promise<{ cues: Cue[]; candidates: string[]; curated: boolean } | null> {
   const local = await loadLocalTranscript(ep);
   if (local?.sentences?.length)
-    return { cues: local.sentences, candidates: local.candidates ?? [] };
+    return {
+      cues: local.sentences,
+      candidates: local.candidates ?? [],
+      curated: local.curated ?? false,
+    };
   try {
     const doc = await api.getTranscript(ep);
     if (doc.sentences?.length)
-      return { cues: doc.sentences, candidates: doc.candidates ?? [] };
+      return { cues: doc.sentences, candidates: doc.candidates ?? [], curated: true };
   } catch {
     /* endpoint missing / unreachable — fall through to SRT */
   }
@@ -696,6 +703,8 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     // dictionary senses (capped — this is a glance, not a dictionary page)
     for (const entry of entries.slice(0, 2)) {
       const d = el("div", "gp-dict");
+      // curate-authored definition (word JMdict lacks) — label the source
+      if (entry.ai) d.appendChild(el("span", "gp-tag", "curated"));
       // header already shows the first entry's reading
       if (entry !== entries[0]) d.appendChild(el("span", "gp-reading", entry.r[0] ?? ""));
       for (const sense of entry.s.slice(0, 3)) {
@@ -746,6 +755,18 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
         cues = extendCues(tokenized.cues);
         highValue = new Set(tokenized.candidates);
         fallbackHighValue(getCachedPrep(episodeId));
+        if (!tokenized.curated) {
+          // sidecar was downloaded pre-curation (no grammar/phrase notes,
+          // no curate-authored defs) — refresh in the background and repaint
+          void refreshSidecars(episodeId).then(async (fresh) => {
+            if (!fresh?.curated || !root.isConnected) return;
+            cues = extendCues(fresh.sentences);
+            highValue = new Set(fresh.candidates ?? []);
+            fallbackHighValue(getCachedPrep(episodeId));
+            defs = (await loadLocalDefinitions(episodeId)) ?? defs;
+            repaintCue();
+          });
+        }
       } else {
         cues = extendCues(await loadSrtCues(episodeId));
         status.textContent = "plain subs (no tokenized transcript) — taps unavailable";
