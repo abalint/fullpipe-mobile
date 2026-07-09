@@ -6,7 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import demo from "./demo-prep.json";
 import type { PrepDoc, TapBatch } from "./types";
-import { renderPrep } from "./prep-render";
+import { renderPrep, rubyWord } from "./prep-render";
 import {
   actionEpisode,
   getOutbox,
@@ -69,6 +69,35 @@ describe("renderPrep", () => {
     w.click();
     expect(getTaps(ep)[lemma]).toBeUndefined();
     root.remove();
+  });
+});
+
+describe("rubyWord", () => {
+  const html = (n: Node): string => {
+    const d = document.createElement("div");
+    d.appendChild(n);
+    return d.innerHTML;
+  };
+
+  it("puts furigana over the kanji core only, peeling okurigana", () => {
+    expect(html(rubyWord("切ない", "せつない"))).toBe("<ruby>切<rt>せつ</rt></ruby>ない");
+    expect(html(rubyWord("通す", "とおす"))).toBe("<ruby>通<rt>とお</rt></ruby>す");
+    expect(html(rubyWord("お茶", "おちゃ"))).toBe("お<ruby>茶<rt>ちゃ</rt></ruby>");
+  });
+
+  it("keeps whole-word ruby when there is no okurigana", () => {
+    expect(html(rubyWord("大丈夫", "だいじょうぶ"))).toBe(
+      "<ruby>大丈夫<rt>だいじょうぶ</rt></ruby>",
+    );
+  });
+
+  it("normalizes katakana readings for the peel", () => {
+    expect(html(rubyWord("切ない", "セツナイ"))).toBe("<ruby>切<rt>せつ</rt></ruby>ない");
+  });
+
+  it("passes kana-only and readingless words through bare", () => {
+    expect(html(rubyWord("くれる", "くれる"))).toBe("くれる");
+    expect(html(rubyWord("ノート"))).toBe("ノート");
   });
 });
 
