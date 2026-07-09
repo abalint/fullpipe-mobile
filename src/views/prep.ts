@@ -18,7 +18,6 @@ import {
   queueWatched,
   submitTaps,
 } from "../store";
-import { deleteVideo } from "../video";
 import { flushOutbox } from "../sync";
 import { ratingBlock } from "./queue";
 import type { PrepDoc } from "../types";
@@ -157,19 +156,19 @@ export function prepView(episodeId: string): HTMLElement {
       submit.disabled = false;
     });
 
-    // Step 2: after actually watching — activates exposures and cleans this
-    // episode off the phone. "Mark watched" also pushes the selected cards to
-    // Anki; "Watched · no cards" is the disliked-it branch: same close-out,
-    // deck untouched (rate it so the dislike is on record).
-    // phone-side cleanup + the rate-while-fresh auto-return, shared by the
-    // online and queued-offline close-outs. `keepVideo` is the passive branch:
-    // the episode is headed to the Listen tab, so the downloaded mp4 stays put
-    // and its audio plays straight off the device — no re-download.
-    const localCloseOut = async (keepVideo = false) => {
-      deleteCachedPrep(episodeId); // phone-side cleanup: prep + video + marks
+    // Step 2: after actually watching — activates exposures and pushes cards.
+    // "Mark watched" pushes the selected cards to Anki; "Watched · no cards" is
+    // the disliked-it branch: same close-out, deck untouched (rate it so the
+    // dislike is on record). The downloaded video is deliberately NOT deleted
+    // here — it stays on the device for rewatch / passive listening until you
+    // delete it explicitly (swipe-delete on a queue or Listen row). This is
+    // what lets the queue's "🎧 passive" shelve keep the mp4 instead of forcing
+    // a re-download. phone-side cleanup (prep cache + marks) + the
+    // rate-while-fresh auto-return, shared by the online and offline close-outs.
+    const localCloseOut = async () => {
+      deleteCachedPrep(episodeId); // light cleanup; the on-disk video + sidecars stay
       clearTaps(episodeId);
       clearSubmitted(episodeId);
-      if (!keepVideo) await deleteVideo(episodeId);
       // rate + tag while the impression is fresh; touching the rating cancels
       // the auto-return so there's time to pick tags (else the queue row keeps
       // the control). Reset here so only a *post-watch* touch counts.
@@ -179,9 +178,10 @@ export function prepView(episodeId: string): HTMLElement {
       }, 12000);
     };
 
-    // `passive` = the "keep to listen" branch: cards are pushed like a normal
-    // watched, the episode is shelved onto the Listen tab, and the downloaded
-    // video is retained so its audio plays off the device with no re-download.
+    // `passive` = the "🎧 + listen" branch: same watched close-out, plus the
+    // episode is shelved straight onto the Listen tab. The downloaded video is
+    // retained either way now (deletion is manual), so this only toggles the
+    // shelf — its audio plays off the device with no re-download.
     const finishWatched = async (pushCards: boolean, passive = false) => {
       watchedBtn.disabled = true;
       listenBtn.disabled = true;
@@ -212,7 +212,7 @@ export function prepView(episodeId: string): HTMLElement {
             ? `watched ✔ · pushing ${c.queued} cards in the background (see queue)`
             : `watched ✔ · ${c?.note ?? "no cards"}`;
         barStatus.textContent = passive ? `${base} · 🎧 on Listen · rate it?` : `${base} · rate it?`;
-        await localCloseOut(passive);
+        await localCloseOut();
       } catch (e) {
         // unreachable (no HTTP status) → the watch still counts: queue the
         // close-out in the outbox (after any pending tap batches — FIFO) and
@@ -223,7 +223,7 @@ export function prepView(episodeId: string): HTMLElement {
           barStatus.textContent = passive
             ? "watched ✔ · 🎧 on Listen · queued offline — syncs when reachable · rate it?"
             : "watched ✔ queued offline — syncs when reachable · rate it?";
-          await localCloseOut(passive);
+          await localCloseOut();
           return;
         }
         barStatus.textContent = `⚠ ${(e as Error).message}`;
