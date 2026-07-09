@@ -9,7 +9,7 @@
 // replay-safe server-side (batch_id / review_id dedup, idempotent
 // watched/enqueue), so a double-flush after a flaky connection is harmless.
 
-import type { Job, OutboxAction, PrepDoc, Stats, TapBatch, TapMark } from "./types";
+import type { FollowState, Job, OutboxAction, PrepDoc, Stats, TapBatch, TapMark } from "./types";
 
 export interface Settings {
   serverUrl: string;
@@ -151,12 +151,29 @@ export function queueWatched(episodeId: string, cards: boolean): void {
 /** Queue a rating review. Replaces a pending unsent review for the episode —
     offline re-rates are UI fiddling, not taste drift; only the last one goes.
     The client-minted review_id makes the eventual POST replay-safe. */
-export function queueRating(episodeId: string, rating: number | null, tags: string[]): void {
+export function queueRating(
+  episodeId: string,
+  rating: number | null,
+  tags: string[],
+  axes: Record<string, number> = {},
+  follow: FollowState | null = null,
+  note = "",
+): void {
   write(
     K.outbox,
     getOutbox().filter((a) => !(a.kind === "rating" && a.episode_id === episodeId)),
   );
-  pushAction({ id: newId(), kind: "rating", episode_id: episodeId, rating, tags, review_id: newId() });
+  pushAction({
+    id: newId(),
+    kind: "rating",
+    episode_id: episodeId,
+    rating,
+    tags,
+    axes,
+    follow,
+    note,
+    review_id: newId(),
+  });
 }
 
 /** Queue a passive shelve/un-shelve for later flush (server unreachable at
@@ -205,11 +222,17 @@ export function pendingPassive(episodeId: string): boolean | null {
   return a && a.kind === "passive" ? a.passive : null;
 }
 
-export function pendingRating(
-  episodeId: string,
-): { rating: number | null; tags: string[] } | null {
+export function pendingRating(episodeId: string): {
+  rating: number | null;
+  tags: string[];
+  axes: Record<string, number>;
+  follow: FollowState | null;
+  note: string;
+} | null {
   const a = getOutbox().find((x) => x.kind === "rating" && x.episode_id === episodeId);
-  return a && a.kind === "rating" ? { rating: a.rating, tags: a.tags } : null;
+  return a && a.kind === "rating"
+    ? { rating: a.rating, tags: a.tags, axes: a.axes, follow: a.follow, note: a.note }
+    : null;
 }
 
 export function pendingEnqueues(): string[] {

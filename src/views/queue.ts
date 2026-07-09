@@ -31,7 +31,8 @@ import {
   getVideoRecord,
   refreshSidecars,
 } from "../video";
-import type { Job, JobState } from "../types";
+import type { FollowState, Job, JobState } from "../types";
+import { FOLLOW_OPTIONS, SURVEY_AXES } from "../types";
 
 const STAGE1: JobState[] = ["downloading", "transcribing", "tokenizing"];
 // states where Stage 1 has (or may have) a staged video on the server
@@ -215,41 +216,74 @@ const TAG_GROUPS: { key: string; label: string; tags: [string, string][] }[] = [
   },
 ];
 
-/** Stars + the optional tag picker as one self-contained control. Star sets
-    the rating (re-tap clears, which also clears tags); once rated, the six tag
-    buttons appear (multi-select). Writes are debounced, go through the outbox
-    (offline they just wait; the client review_id keeps replays idempotent),
-    and append a review to the taste log — re-rating never overwrites; the
-    on-read verdict takes the latest. A pending unsynced review overrides the
-    initial values so an offline re-open shows what you actually picked.
-    `onInteract` fires synchronously on any tap (lets the prep view cancel its
-    post-watch auto-return); `onQueued` fires when the review couldn't reach
-    the server and is waiting in the outbox. */
+/** A labelled 1-5 pip row (SURVEY.md) — the graded survey axes reuse the star's
+    out-of-5 metaphor. Re-tapping the current value clears the axis. */
+function pipRow(
+  label: string,
+  value: number | undefined,
+  onSet: (v: number | undefined) => void,
+): HTMLElement {
+  const row = el("div", "axis");
+  row.appendChild(el("span", "axislabel", label));
+  const pips = el("div", "pips");
+  for (let n = 1; n <= 5; n++) {
+    const on = value != null && n <= value;
+    const b = el("button", `pip${on ? " on" : ""}`) as HTMLButtonElement;
+    b.setAttribute("aria-label", `${label} ${n}`);
+    b.addEventListener("click", () => onSet(n === value ? undefined : n));
+    pips.appendChild(b);
+  }
+  row.appendChild(pips);
+  return row;
+}
+
+/** The post-watch survey (SURVEY.md) as one self-contained control:
+    - overall **star** (re-tap clears, which clears the video axes/chips/note);
+    - graded **axes** (Topic/Presenter/Audio/Speech/Difficulty), shown once rated;
+    - taste **chips** (multi-select);
+    - a **note** field; and
+    - a **channel follow** control that is ALWAYS shown and survives a star clear
+      (it's a per-channel intent, not a video verdict).
+    Writes are debounced through the outbox (offline they wait; the client
+    review_id keeps replays idempotent) and append a review to the taste log —
+    re-rating never overwrites; the on-read verdict takes the latest. A pending
+    unsynced review overrides the initial values so an offline re-open shows what
+    you actually picked. `onInteract` fires on any tap (lets prep cancel its
+    post-watch auto-return); `onQueued` fires when the review is stuck offline. */
 export function ratingBlock(
   episodeId: string,
   initialRating: number | null | undefined,
   initialTags: string[],
   onInteract?: () => void,
   onQueued?: () => void,
+  initialAxes: Record<string, number> = {},
+  initialFollow: FollowState | null = null,
 ): HTMLElement {
   const wrap = el("div", "rating");
   const pending = pendingRating(episodeId);
   let rating: number | null = pending ? pending.rating : (initialRating ?? null);
   const tags = new Set<string>(pending ? pending.tags : initialTags);
+  const axes = new Map<string, number>(Object.entries(pending ? pending.axes : initialAxes));
+  let follow: FollowState | null = pending ? pending.follow : initialFollow;
+  let note = pending ? pending.note : "";
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const send = () => {
     if (timer) clearTimeout(timer);
     const r = rating;
     const t = [...tags];
+    const a = Object.fromEntries(axes);
+    const f = follow;
+    const n = note;
     timer = setTimeout(() => {
-      queueRating(episodeId, r, t);
+      queueRating(episodeId, r, t, a, f, n);
       void flushOutbox().then((res) => {
         if (res.error && pendingRating(episodeId)) onQueued?.();
       });
     }, 450); // coalesce rapid taps into a single review batch
   };
 
+  // --- taste chips ---
   const tagWrap = el("div", "tagpicker");
   const tagButtons = new Map<string, HTMLButtonElement>();
   for (const group of TAG_GROUPS) {
@@ -270,7 +304,57 @@ export function ratingBlock(
     }
     tagWrap.appendChild(g);
   }
-  const showTags = () => (tagWrap.style.display = rating == null ? "none" : "");
+
+  // --- graded axes ---
+  const axesHost = el("div", "axes");
+  const renderAxes = () => {
+    axesHost.textContent = "";
+    for (const [key, label] of SURVEY_AXES) {
+      axesHost.appendChild(
+        pipRow(label, axes.get(key), (v) => {
+          onInteract?.();
+          if (v == null) axes.delete(key);
+          else axes.set(key, v);
+          renderAxes();
+          send();
+        }),
+      );
+    }
+  };
+  renderAxes();
+
+  // --- free note ---
+  const noteBox = el("textarea", "note") as HTMLTextAreaElement;
+  noteBox.rows = 2;
+  noteBox.placeholder = "a line on why (optional)…";
+  noteBox.value = note;
+  noteBox.addEventListener("input", () => {
+    onInteract?.();
+    note = noteBox.value;
+    send();
+  });
+
+  // Video-scoped controls (axes/chips/note) only make sense once rated.
+  const videoWrap = el("div", "videosurvey");
+  videoWrap.append(tagWrap, axesHost, noteBox);
+  const showVideoSurvey = () => (videoWrap.style.display = rating == null ? "none" : "");
+
+  // --- channel follow (always shown; independent of the star) ---
+  const followWrap = el("div", "follow");
+  followWrap.appendChild(el("span", "followlabel", "Channel"));
+  const followButtons = new Map<FollowState, HTMLButtonElement>();
+  for (const [state, label] of FOLLOW_OPTIONS) {
+    const b = el("button", `followbtn ${state}`, label) as HTMLButtonElement;
+    if (follow === state) b.classList.add("on");
+    b.addEventListener("click", () => {
+      onInteract?.();
+      follow = follow === state ? null : state;
+      for (const [s, btn] of followButtons) btn.classList.toggle("on", follow === s);
+      send();
+    });
+    followButtons.set(state, b);
+    followWrap.appendChild(b);
+  }
 
   const starsHost = el("div");
   const renderStars = () => {
@@ -282,17 +366,21 @@ export function ratingBlock(
         if (rating == null) {
           tags.clear();
           for (const b of tagButtons.values()) b.classList.remove("on");
+          axes.clear();
+          renderAxes();
+          note = "";
+          noteBox.value = "";
         }
         renderStars();
-        showTags();
+        showVideoSurvey();
         send();
       }),
     );
   };
 
   renderStars();
-  showTags();
-  wrap.append(starsHost, tagWrap);
+  showVideoSurvey();
+  wrap.append(starsHost, videoWrap, followWrap);
   return wrap;
 }
 
@@ -341,7 +429,17 @@ function jobRow(
   if (RATABLE.includes(state)) {
     // ratingBlock keeps its own state (star + tags) so tapping never triggers a
     // full list reload that would collapse the picker mid-selection.
-    main.appendChild(ratingBlock(job.episode_id, job.rating, job.tags ?? [], onRatingTouch));
+    main.appendChild(
+      ratingBlock(
+        job.episode_id,
+        job.rating,
+        job.tags ?? [],
+        onRatingTouch,
+        undefined,
+        job.axes ?? {},
+        job.follow ?? null,
+      ),
+    );
   }
   row.appendChild(main);
 

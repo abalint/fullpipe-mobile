@@ -4,6 +4,7 @@
 import type {
   ConfirmCandidate,
   Definitions,
+  FollowState,
   ItemKind,
   Job,
   PrepDoc,
@@ -109,13 +110,25 @@ export const api = {
   postTaps: (batch: TapBatch) =>
     request<{ applied: number; cards_selected?: number | null; duplicate: boolean }>(
       "/taps", { method: "POST", body: JSON.stringify(batch) }),
-  // rating 1-5 (null clears) + optional taste tags — appended to the taste_events
-  // log server-side (re-POST appends a new review; the on-read verdict takes the
-  // latest). review_id makes the POST replay-safe for outbox re-flushes.
-  rate: (id: string, rating: number | null, tags: string[] = [], reviewId?: string) =>
+  // Post-watch survey (SURVEY.md): overall star (null clears) + chips + graded
+  // axes + per-channel follow + free note — appended to the taste_events log
+  // server-side (re-POST appends a new review; on-read verdict takes the latest).
+  // review_id makes the POST replay-safe for outbox re-flushes.
+  rate: (
+    id: string,
+    rating: number | null,
+    tags: string[] = [],
+    reviewId?: string,
+    axes: Record<string, number> = {},
+    follow: FollowState | null = null,
+    note = "",
+  ) =>
     request<{ episode_id: string; rating: number | null; tags: string[] }>(
       `/episodes/${encodeURIComponent(id)}/rating`,
-      { method: "POST", body: JSON.stringify({ rating, tags, review_id: reviewId }) }),
+      {
+        method: "POST",
+        body: JSON.stringify({ rating, tags, axes, follow, note, review_id: reviewId }),
+      }),
   // cards:false is the disliked-it branch — exposures still activate, deck stays clean.
   // The push itself runs server-side in the background: the response says how many
   // cards were queued; progress/errors land on the queue row (`pushing` → `watched`)

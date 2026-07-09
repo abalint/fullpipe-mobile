@@ -147,6 +147,32 @@ input {
 .taggroup.neg .tag.on { color: var(--dunno); border-color: color-mix(in srgb, var(--dunno) 45%, transparent);
        background: color-mix(in srgb, var(--dunno) 20%, transparent); }
 
+/* Post-watch survey (SURVEY.md): graded axes as 1-5 pip rows, a note, and the
+   channel-follow control. */
+.videosurvey { display: flex; flex-direction: column; gap: 6px; }
+.axes { display: flex; flex-direction: column; gap: 3px; }
+.axis { display: flex; align-items: center; gap: 8px; }
+.axislabel { font-size: .68rem; color: var(--muted); width: 68px; flex: none;
+             text-transform: uppercase; letter-spacing: .03em; }
+.pips { display: flex; gap: 3px; }
+.pip { width: 20px; height: 20px; padding: 0; border-radius: 6px;
+       border: 1px solid var(--border); background: transparent; }
+.pip.on { background: var(--accent); border-color: var(--accent); }
+.note { width: 100%; box-sizing: border-box; resize: vertical; font: inherit;
+        font-size: .8rem; padding: 6px 8px; border-radius: 8px;
+        border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+.follow { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 2px; }
+.followlabel { font-size: .62rem; color: var(--muted); text-transform: uppercase;
+               letter-spacing: .05em; margin-right: 2px; }
+.followbtn { font-size: .74rem; padding: 3px 10px; border-radius: 99px; line-height: 1.3;
+             border: 1px solid var(--border); background: transparent; color: var(--muted); }
+.followbtn.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+                background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.followbtn.more.on { color: var(--know); border-color: color-mix(in srgb, var(--know) 50%, transparent);
+                     background: color-mix(in srgb, var(--know) 18%, transparent); }
+.followbtn.block.on { color: var(--dunno); border-color: color-mix(in srgb, var(--dunno) 50%, transparent);
+                      background: color-mix(in srgb, var(--dunno) 18%, transparent); }
+
 .chip { font-size: .72rem; padding: 1px 8px; border-radius: 99px;
         background: var(--border); color: var(--muted); }
 .chip.st-prepared { background: color-mix(in srgb, var(--accent) 25%, transparent); color: var(--accent); }

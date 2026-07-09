@@ -163,7 +163,13 @@ describe("outbox", () => {
     queueRating(ep, 5, ["fascinating"]); // offline re-rate replaces, not appends
     expect(getOutbox().length).toBe(2);
     expect(pendingWatched(ep)).toEqual({ cards: false });
-    expect(pendingRating(ep)).toEqual({ rating: 5, tags: ["fascinating"] });
+    expect(pendingRating(ep)).toEqual({
+      rating: 5,
+      tags: ["fascinating"],
+      axes: {},
+      follow: null,
+      note: "",
+    });
   });
 
   it("dedupes identical queued enqueues (POST /jobs is idempotent anyway)", () => {

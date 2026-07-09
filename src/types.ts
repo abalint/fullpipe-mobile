@@ -22,8 +22,10 @@ export interface Job {
   passive?: boolean; // shelved into the passive-listening collection
   progress?: number; // 0..1 within the current state, if the worker reports it
   progress_msg?: string | null; // live narration ("pushing card 3/12")
-  rating?: number | null; // 1-5 stars from the ledger; null/absent = unrated
-  tags?: string[]; // taste tags on the latest review (RATING_TAGS slugs)
+  rating?: number | null; // 1-5 overall star from the ledger; null/absent = unrated
+  tags?: string[]; // taste chips on the latest review (RATING_TAGS slugs)
+  axes?: Record<string, number>; // survey axes 1-5 (SURVEY.md): topic_pull, presenter, …
+  follow?: FollowState | null; // per-channel intent, decoupled from the star
   duration?: number | null; // runtime in seconds, once Stage 1 has artifacts
   comprehensibility?: number | null; // coverage's token_comprehensibility, 0..1
   error?: string | null;
@@ -199,6 +201,28 @@ export interface TapBatch {
   taps: [string, TapMark][];
 }
 
+/** Channel follow intent (SURVEY.md §4a) — a per-channel signal, not a video
+    verdict. `block` is a hard veto; `more` keeps a channel a strong recommender
+    seed even when the video that earned it was mediocre. */
+export type FollowState = "block" | "less" | "neutral" | "more";
+
+/** The graded 1-5 survey axes (SURVEY.md §2), in display order. Each is its own
+    vector — a 5 on `difficulty` means "too hard", not "good". */
+export const SURVEY_AXES: [key: string, label: string][] = [
+  ["topic_pull", "Topic"],
+  ["presenter", "Presenter"],
+  ["audio_fidelity", "Audio"],
+  ["speech_clarity", "Speech"],
+  ["difficulty", "Difficulty"],
+];
+
+export const FOLLOW_OPTIONS: [state: FollowState, label: string][] = [
+  ["block", "Block"],
+  ["less", "Less"],
+  ["neutral", "—"],
+  ["more", "More"],
+];
+
 /** One queued offline action. The outbox is FIFO (an episode's taps flush
     before its watched), and every kind is replay-safe server-side: taps
     dedupe on batch_id, ratings on review_id, watched/enqueue are idempotent. */
@@ -211,6 +235,9 @@ export type OutboxAction =
       episode_id: string;
       rating: number | null;
       tags: string[];
+      axes: Record<string, number>;
+      follow: FollowState | null;
+      note: string;
       review_id: string;
     }
   | { id: string; kind: "enqueue"; source: string }

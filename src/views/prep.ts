@@ -20,7 +20,7 @@ import {
 } from "../store";
 import { flushOutbox } from "../sync";
 import { ratingBlock } from "./queue";
-import type { PrepDoc } from "../types";
+import type { FollowState, PrepDoc } from "../types";
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
   const n = document.createElement(tag);
@@ -90,7 +90,12 @@ export function prepView(episodeId: string): HTMLElement {
     // to pick tags.
     let engaged = false;
     const stars = el("span");
-    const mountRating = (rating: number | null, tags: string[]) => {
+    const mountRating = (
+      rating: number | null,
+      tags: string[],
+      axes: Record<string, number> = {},
+      follow: FollowState | null = null,
+    ) => {
       stars.textContent = "";
       stars.appendChild(
         ratingBlock(
@@ -99,16 +104,18 @@ export function prepView(episodeId: string): HTMLElement {
           tags,
           () => (engaged = true),
           () => (barStatus.textContent = "rating queued — will sync when reachable"),
+          axes,
+          follow,
         ),
       );
     };
     // prefill from the queue snapshot (works offline), then the live server
     const snap = getCachedJobs()?.jobs.find((j) => j.episode_id === episodeId);
-    mountRating(snap?.rating ?? null, snap?.tags ?? []);
+    mountRating(snap?.rating ?? null, snap?.tags ?? [], snap?.axes ?? {}, snap?.follow ?? null);
     void api
       .getJob(episodeId)
       .then((j) => {
-        if (!engaged) mountRating(j.rating ?? null, j.tags ?? []);
+        if (!engaged) mountRating(j.rating ?? null, j.tags ?? [], j.axes ?? {}, j.follow ?? null);
       })
       .catch(() => {});
 

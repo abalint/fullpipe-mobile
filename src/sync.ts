@@ -23,7 +23,15 @@ function send(action: OutboxAction): Promise<unknown> {
     case "watched":
       return api.markWatched(action.episode_id, action.cards);
     case "rating":
-      return api.rate(action.episode_id, action.rating, action.tags, action.review_id);
+      return api.rate(
+        action.episode_id,
+        action.rating,
+        action.tags,
+        action.review_id,
+        action.axes,
+        action.follow,
+        action.note,
+      );
     case "enqueue":
       return api.enqueue(action.source);
     case "passive":
