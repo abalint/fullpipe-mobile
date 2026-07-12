@@ -103,6 +103,12 @@ export const api = {
   setPassive: (id: string, passive: boolean) =>
     request<Job>(`/jobs/${encodeURIComponent(id)}/passive`,
       { method: "POST", body: JSON.stringify({ passive }) }),
+  // queue an episode for a post-watch /debrief conversation (or clear the
+  // flag) — server-side flag only; while set the server refuses delete, so
+  // the transcript survives until the debrief has happened
+  setDebrief: (id: string, debrief: boolean) =>
+    request<Job>(`/jobs/${encodeURIComponent(id)}/debrief`,
+      { method: "POST", body: JSON.stringify({ debrief }) }),
   deleteJob: (id: string) =>
     request<{ deleted: string; files_removed: number }>(
       `/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }),

@@ -188,6 +188,10 @@ input {
 /* unsynced offline actions waiting in the outbox for this episode */
 .chip.pending { margin-left: 6px; background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent); border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
+/* queued for a post-watch /debrief conversation — delete blocked until done */
+.chip.debrief { margin-left: 6px; background: color-mix(in srgb, var(--know) 15%, transparent);
+  color: var(--know); border: 1px solid color-mix(in srgb, var(--know) 45%, transparent); }
+button.small.on { border-color: var(--accent); color: var(--accent); }
 
 /* Listen tab: now-playing bar + the row currently coming out of the speaker */
 .listenbar { display: flex; flex-direction: column; gap: 8px; background: var(--card);

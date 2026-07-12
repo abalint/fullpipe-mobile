@@ -20,6 +20,7 @@ export interface Job {
   title?: string;
   state: JobState;
   passive?: boolean; // shelved into the passive-listening collection
+  debrief?: boolean; // queued for a post-watch /debrief conversation (delete blocked while set)
   progress?: number; // 0..1 within the current state, if the worker reports it
   progress_msg?: string | null; // live narration ("pushing card 3/12")
   rating?: number | null; // 1-5 overall star from the ledger; null/absent = unrated
