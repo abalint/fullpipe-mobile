@@ -66,12 +66,25 @@ export function segsNode(segs?: Segs): DocumentFragment {
   return frag;
 }
 
-// exported for the player's subtitle overlay — same markup, same tap classes
-export function tokenSpan(t: Token, targetLemma: string | null): Node {
-  if (!t.c) return document.createTextNode(t.s);
+// Nothing lookup-worthy: punctuation, symbols, bare digits, whitespace.
+// Doubles as the compound-run break (compoundKeysAt) — MUST stay in lockstep
+// with the server's RUN_BREAK (tools/jmdict.py), which decides what compound
+// keys /definitions serves.
+export const NO_LOOKUP = /^[\s0-9０-９]*$|^[^ぁ-ゖァ-ヶー㐀-鿿々〆A-Za-z0-9０-９]+$/;
+
+// exported for the player's subtitle overlay — same markup, same tap classes.
+// anyWord: the player popup answers ANY tap (particles, aux verbs, names —
+// /definitions now serves every lemma), so every word gets a span there; the
+// prep doc keeps its vocab-only tap targets (its taps are know/don't-know
+// marks, and marking の "known" is noise).
+export function tokenSpan(t: Token, targetLemma: string | null, anyWord = false): Node {
+  if (!t.c && !(anyWord && t.l && !NO_LOOKUP.test(t.l)))
+    return document.createTextNode(t.s);
   const cls = ["w"];
-  if (!t.k) cls.push("unk");
-  if (targetLemma && t.l === targetLemma) cls.push("target");
+  if (t.c) {
+    if (!t.k) cls.push("unk");
+    if (targetLemma && t.l === targetLemma) cls.push("target");
+  }
   const n = el("span", cls.join(" "));
   n.appendChild(rubyWord(t.s, t.r));
   if (t.l) n.dataset.lemma = t.l;

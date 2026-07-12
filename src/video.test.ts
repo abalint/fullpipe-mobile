@@ -32,7 +32,13 @@ vi.mock("@capacitor/filesystem", () => ({
   },
 }));
 
-import { loadLocalTranscript, refreshSidecars, getVideoRecord } from "./video";
+import {
+  getVideoRecord,
+  loadLocalTranscript,
+  refreshSidecars,
+  SIDECAR_FORMAT,
+  sidecarsOutdated,
+} from "./video";
 import { saveSettings } from "./store";
 
 const EP = "yt_test123";
@@ -101,6 +107,21 @@ describe("refreshSidecars", () => {
   it("is a no-op without a downloaded video", async () => {
     localStorage.clear();
     saveSettings({ serverUrl: "http://pc:8000", token: "" });
+    expect(await refreshSidecars(EP)).toBeNull();
+  });
+
+  it("re-pulls a curated record whose sidecars predate the wire format", async () => {
+    // a record cached before SIDECAR_FORMAT existed (format absent = 1):
+    // curated, but its definitions sidecar only has content lemmas
+    const rec = JSON.parse(localStorage.getItem(`fp.video.${EP}`)!);
+    localStorage.setItem(`fp.video.${EP}`, JSON.stringify({ ...rec, curated: true }));
+    expect(sidecarsOutdated(EP)).toBe(true);
+    server.set(T_URL, JSON.stringify(postCurate));
+    server.set(D_URL, "{}");
+    expect((await refreshSidecars(EP))?.curated).toBe(true);
+    expect(getVideoRecord(EP)?.format).toBe(SIDECAR_FORMAT);
+    expect(sidecarsOutdated(EP)).toBe(false);
+    server.clear(); // now current — a second call must not hit the network
     expect(await refreshSidecars(EP)).toBeNull();
   });
 });

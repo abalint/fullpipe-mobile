@@ -380,10 +380,16 @@ button.small.on { border-color: var(--accent); color: var(--accent); }
 .gloss-pop .gp-head ruby rt { color: #bbb; }
 .gloss-pop .gp-mark { margin-left: auto; padding: 4px 10px; font-size: .78rem;
                       background: transparent; color: #ddd; border-color: #555; }
+/* how the tapped word is conjugated here (inflection.ts chain) */
+.gloss-pop .gp-inflect { color: #cfe6cf; font-size: .92rem; margin-top: 2px; }
+.gloss-pop .gp-surface, .gloss-pop .gp-part { font-weight: 600; }
+.gloss-pop .gp-part-label { color: #9db89d; font-size: .78rem; }
 .gloss-pop .gp-gloss { color: #ffd9a8; }
 .gloss-pop .gp-note, .gloss-pop .gp-why { color: #cfcfcf; font-size: .88rem; }
 .gloss-pop .gp-why::before { content: "★ "; color: #ff9f2e; }
 .gloss-pop .gp-dict { margin-top: 4px; }
+/* compound/expression the tapped token is part of (compounds.ts) */
+.gloss-pop .gp-compound { border-left: 2px solid #8fbf8f; padding-left: 8px; }
 .gloss-pop .gp-reading { color: #9ecbff; margin-right: 6px; }
 .gloss-pop .gp-pos { color: #8fbf8f; font-size: .72rem; margin-right: 6px;
                      text-transform: lowercase; }

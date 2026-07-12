@@ -13,6 +13,13 @@ import { PassiveAudio } from "./audio";
 import { cachePrep, getSettings } from "./store";
 import type { Definitions, TranscriptDoc } from "./types";
 
+/** Sidecar wire-format generation. Bump when the server starts sending
+    materially richer sidecars so refreshSidecars re-pulls episodes that are
+    already `curated` (they'd otherwise cache the old shape forever).
+    2: /definitions serves every lemma (any-word popup) + repair-gate names.
+    3: /definitions adds compound keys (帝王切開, そういう — compounds.ts). */
+export const SIDECAR_FORMAT = 3;
+
 export interface VideoRecord {
   path: string;
   subsPath?: string;
@@ -20,6 +27,7 @@ export interface VideoRecord {
   defsPath?: string; // per-episode JMdict definitions (absent on old records)
   curated?: boolean; // sidecars carry the curate pass (grammar/phrases/defs);
   // false/absent → refreshSidecars retries once curation lands
+  format?: number; // SIDECAR_FORMAT at last pull (absent = 1)
   size: number;
   at: string;
 }
@@ -166,6 +174,7 @@ export async function downloadVideo(
       curated: transcriptPath
         ? ((await readLocalJson<TranscriptDoc>(transcriptPath))?.curated ?? false)
         : false,
+      format: SIDECAR_FORMAT,
       size: stat.size,
       at: new Date().toISOString(),
     };
@@ -180,11 +189,12 @@ export async function downloadVideo(
     downloaded at `prepared`, before /immerse has curated — so the sidecars
     lack grammar/phrase notes and the curate-authored definitions until this
     runs. Called once curation lands (queue refresh / player open); a no-op
-    when the record is already curated. Returns the fresh transcript, or null
-    when nothing was refreshed (no record, offline, still uncurated). */
+    when the record is already curated AND on the current sidecar format.
+    Returns the fresh transcript, or null when nothing was refreshed (no
+    record, offline, still uncurated). */
 export async function refreshSidecars(ep: string): Promise<TranscriptDoc | null> {
   const rec = getVideoRecord(ep);
-  if (!rec || rec.curated) return null;
+  if (!rec || (rec.curated && (rec.format ?? 1) >= SIDECAR_FORMAT)) return null;
   const { token } = getSettings();
   const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
   // stage into .fresh then swap, so a failed download can't truncate the
@@ -228,9 +238,17 @@ export async function refreshSidecars(ep: string): Promise<TranscriptDoc | null>
       transcriptPath: tPath,
       defsPath: dPath,
       curated: doc.curated ?? false,
+      format: SIDECAR_FORMAT,
     }),
   );
   return doc;
+}
+
+/** True when the episode's sidecars predate the current wire format —
+    the player should refresh even though the record says `curated`. */
+export function sidecarsOutdated(ep: string): boolean {
+  const rec = getVideoRecord(ep);
+  return !!rec?.transcriptPath && (rec.format ?? 1) < SIDECAR_FORMAT;
 }
 
 export async function deleteVideo(ep: string): Promise<void> {

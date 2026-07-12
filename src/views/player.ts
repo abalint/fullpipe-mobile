@@ -26,6 +26,8 @@ import type { PluginListenerHandle } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { api } from "../api";
 import { PassiveAudio } from "../audio";
+import { compoundKeysAt } from "../compounds";
+import { inflectionAt } from "../inflection";
 import { rubyWord, segsNode, tokenSpan } from "../prep-render";
 import { cachePrep, cycleTap, getCachedPrep, getTaps } from "../store";
 import {
@@ -35,6 +37,7 @@ import {
   loadLocalDefinitions,
   loadLocalTranscript,
   refreshSidecars,
+  sidecarsOutdated,
   savePosition,
 } from "../video";
 import type {
@@ -603,9 +606,13 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     if (tier !== "off" && isIplus1(c) && k === badgeLine)
       line.appendChild(el("span", "iplus-badge", "+1"));
     for (const t of chunk) {
-      const n = tokenSpan(t, null);
-      const hl = tokenHighlight(t, tier, keywords, highValue, target, c.cls);
-      if (hl && n instanceof HTMLElement) n.classList.add(hl);
+      const n = tokenSpan(t, null, true); // any word answers a tap
+      if (n instanceof HTMLElement) {
+        // index within the cue's full token list → inflection-chain lookup
+        n.dataset.ti = String(c.tokens!.indexOf(t));
+        const hl = tokenHighlight(t, tier, keywords, highValue, target, c.cls);
+        if (hl) n.classList.add(hl);
+      }
       line.appendChild(n);
     }
     return line;
@@ -674,7 +681,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   const hidePop = () => (pop.style.display = "none");
   const markLabel = (m: TapMark | undefined) =>
     m === "k" ? "known ✓" : m === "h" ? "interest ★" : "mark";
-  const showPopup = (lemma: string) => {
+  const showPopup = (lemma: string, ti?: number) => {
     const info = keywords.get(lemma);
     const entries = defs[lemma] ?? [];
     pop.textContent = "";
@@ -688,6 +695,42 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     });
     head.appendChild(mark);
     pop.appendChild(head);
+    // how the tapped word is conjugated HERE — deterministic from the
+    // token chain (inflection.ts), so it works on every line, not just
+    // curated ones
+    const cueTokens = cues[current]?.tokens ?? [];
+    const infl = ti != null ? inflectionAt(cueTokens, ti) : null;
+    if (infl && (infl.parts.length > 1 || infl.surface !== infl.lemma)) {
+      const row = el("div", "gp-inflect");
+      row.appendChild(el("span", "gp-surface", infl.surface));
+      row.appendChild(document.createTextNode(" ＝ "));
+      infl.parts.forEach((p, i) => {
+        if (i) row.appendChild(document.createTextNode(" ＋ "));
+        row.appendChild(el("span", "gp-part", p.text));
+        if (p.label) row.appendChild(el("span", "gp-part-label", `〔${p.label}〕`));
+      });
+      pop.appendChild(row);
+    }
+    // compounds/expressions this token is part of (帝王切開, そういう) —
+    // the server pre-validated the runs; we just probe the joined keys
+    const compounds = (ti != null ? compoundKeysAt(cueTokens, ti) : [])
+      .filter((k) => k !== lemma && defs[k])
+      .slice(0, 2);
+    for (const key of compounds) {
+      const d = el("div", "gp-dict gp-compound");
+      d.appendChild(el("span", "gp-tag", "compound"));
+      d.appendChild(el("span", "gp-pattern", key));
+      const entry = defs[key][0];
+      if (entry.r[0] && entry.r[0] !== key)
+        d.appendChild(el("span", "gp-reading", ` ${entry.r[0]}`));
+      for (const sense of entry.s.slice(0, 2)) {
+        const line = el("div", "gp-sense");
+        if (sense.pos.length) line.appendChild(el("span", "gp-pos", sense.pos[0]));
+        line.appendChild(document.createTextNode(sense.g.slice(0, 4).join("; ")));
+        d.appendChild(line);
+      }
+      pop.appendChild(d);
+    }
     // the curate pass's own gloss/note/why lead — they're episode-specific
     if (info?.entry.gloss) pop.appendChild(el("div", "gp-gloss", info.entry.gloss));
     if (info?.entry.note_segs?.length) {
@@ -733,7 +776,8 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
         row.appendChild(document.createTextNode(` — here: ${p.surface}`));
       pop.appendChild(row);
     }
-    if (!info && !entries.length && !cue?.grammar?.length && !cue?.phrases?.length)
+    if (!info && !entries.length && !infl && !compounds.length &&
+        !cue?.grammar?.length && !cue?.phrases?.length)
       pop.appendChild(el("div", "gp-none", "no dictionary entry"));
     pop.style.display = "";
   };
@@ -745,7 +789,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     const w = (e.target as HTMLElement).closest<HTMLElement>(".w[data-lemma]");
     if (!w) return;
     e.stopPropagation(); // don't fall through to the stage's play/pause toggle
-    showPopup(w.dataset.lemma!);
+    showPopup(w.dataset.lemma!, w.dataset.ti != null ? Number(w.dataset.ti) : undefined);
   });
 
   void (async () => {
@@ -755,9 +799,10 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
         cues = extendCues(tokenized.cues);
         highValue = new Set(tokenized.candidates);
         fallbackHighValue(getCachedPrep(episodeId));
-        if (!tokenized.curated) {
-          // sidecar was downloaded pre-curation (no grammar/phrase notes,
-          // no curate-authored defs) — refresh in the background and repaint
+        if (!tokenized.curated || sidecarsOutdated(episodeId)) {
+          // sidecar was downloaded pre-curation (no grammar/phrase notes, no
+          // curate-authored defs) or on an old wire format (e.g. content-
+          // lemma-only definitions) — refresh in the background and repaint
           void refreshSidecars(episodeId).then(async (fresh) => {
             if (!fresh?.curated || !root.isConnected) return;
             cues = extendCues(fresh.sentences);
