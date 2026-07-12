@@ -190,12 +190,16 @@ input {
   color: var(--accent); border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
 
 /* Listen tab: now-playing bar + the row currently coming out of the speaker */
-.listenbar { display: flex; align-items: center; gap: 10px; background: var(--card);
+.listenbar { display: flex; flex-direction: column; gap: 8px; background: var(--card);
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; }
-.listenbar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+.listenbar-title { min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; font-size: .9rem; }
-.listenbar-controls { display: flex; gap: 6px; align-items: center; }
+.listenbar-seek { display: flex; gap: 8px; align-items: center; }
+.listenbar-seek input[type="range"] { flex: 1; accent-color: var(--accent); }
+.listenbar-seek .clock { white-space: nowrap; font-size: .8rem;
+  font-variant-numeric: tabular-nums; }
+.listenbar-controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .job.playing { outline: 1.5px solid var(--accent); outline-offset: -1.5px; }
 
 /* partway-through-watching bar on a queue row (position is device-local) */

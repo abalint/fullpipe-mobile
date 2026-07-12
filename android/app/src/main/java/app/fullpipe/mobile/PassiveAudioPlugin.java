@@ -50,6 +50,8 @@ public class PassiveAudioPlugin extends Plugin {
         o.put("index", s != null ? s.getIndex() : -1);
         o.put("speed", s != null ? s.getSpeed() : 1f);
         o.put("positionMs", s != null ? s.getPositionMs() : 0);
+        o.put("durationMs", s != null ? s.getDurationMs() : 0);
+        o.put("sleepRemainingMs", s != null ? s.getSleepRemainingMs() : 0);
         String ep = s != null ? s.currentEpisodeId() : null;
         if (ep != null) o.put("episodeId", ep);
         return o;
@@ -89,7 +91,8 @@ public class PassiveAudioPlugin extends Plugin {
                 tracks.add(new PassiveAudioService.Track(
                         path,
                         it.optString("title", path),
-                        it.getString("episodeId")));
+                        it.getString("episodeId"),
+                        it.optLong("startMs", 0)));
             }
         } catch (JSONException e) {
             call.reject("bad playlist item: " + e.getMessage());
@@ -140,6 +143,44 @@ public class PassiveAudioPlugin extends Plugin {
     public void setSpeed(PluginCall call) {
         float speed = call.getFloat("speed", 1f);
         withService(call, s -> s.setSpeed(speed));
+    }
+
+    @PluginMethod
+    public void seekTo(PluginCall call) {
+        int positionMs = call.getInt("positionMs", 0);
+        withService(call, s -> s.seekTo(positionMs));
+    }
+
+    @PluginMethod
+    public void seekBy(PluginCall call) {
+        int deltaMs = call.getInt("deltaMs", 0);
+        withService(call, s -> s.seekBy(deltaMs));
+    }
+
+    /** minutes > 0 arms (or re-arms) the sleep timer; 0 cancels it. */
+    @PluginMethod
+    public void setSleepTimer(PluginCall call) {
+        int minutes = call.getInt("minutes", 0);
+        withService(call, s -> s.setSleepTimer(minutes));
+    }
+
+    /** Mirror of the JS-side resume position into the service's store, so
+        video watching and passive listening agree on "where you left off".
+        positionMs <= 0 clears the entry. Works with the service dead. */
+    @PluginMethod
+    public void setSavedPosition(PluginCall call) {
+        String episodeId = call.getString("episodeId");
+        if (episodeId == null) {
+            call.reject("episodeId required");
+            return;
+        }
+        int positionMs = call.getInt("positionMs", 0);
+        android.content.SharedPreferences prefs = getContext()
+                .getSharedPreferences(PassiveAudioService.POSITIONS_PREFS,
+                        android.content.Context.MODE_PRIVATE);
+        if (positionMs > 0) prefs.edit().putLong(episodeId, positionMs).apply();
+        else prefs.edit().remove(episodeId).apply();
+        call.resolve();
     }
 
     @PluginMethod

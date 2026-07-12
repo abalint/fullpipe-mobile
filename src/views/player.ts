@@ -368,7 +368,7 @@ export function cueTriggered(
   return !!c.tokens?.some((t) => t.l && (keywords.has(t.l) || taps[t.l] === "h"));
 }
 
-function fmtClock(sec: number): string {
+export function fmtClock(sec: number): string {
   if (!Number.isFinite(sec) || sec < 0) sec = 0;
   const s = Math.floor(sec);
   const mm = Math.floor((s % 3600) / 60);
@@ -815,8 +815,8 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     else savePosition(episodeId, video.currentTime);
   };
 
-  const updateClock = () => {
-    clock.textContent = `${fmtClock(video.currentTime)} / ${fmtClock(video.duration)}`;
+  const updateClock = (t?: number) => {
+    clock.textContent = `${fmtClock(t ?? video.currentTime)} / ${fmtClock(video.duration)}`;
   };
 
   let scrubbing = false;
@@ -837,19 +837,36 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
 
   scrub.addEventListener("pointerdown", () => (scrubbing = true));
   scrub.addEventListener("input", () => {
-    video.currentTime = Number(scrub.value);
+    // audio mode seeks the native service on release (change) — per-input
+    // bridge calls would flood MediaPlayer.seekTo; just preview the clock
+    if (audioMode) updateClock(Number(scrub.value));
+    else video.currentTime = Number(scrub.value);
   });
-  scrub.addEventListener("change", () => (scrubbing = false));
+  scrub.addEventListener("change", () => {
+    scrubbing = false;
+    if (audioMode)
+      void PassiveAudio.seekTo({ positionMs: Math.floor(Number(scrub.value) * 1000) })
+        .catch(() => {});
+  });
 
   // --- audio mode: hand the current position to the native passive-audio
   // service so playback survives the screen turning off (the Listen tab's
   // foreground service + lock-screen controls), then take it back on toggle.
   let audioMode = false;
   let audioListener: Promise<PluginListenerHandle> | null = null;
+  let audioPosSec = 0; // last position tick from the service — anchors seekCue
 
   const attachAudioListener = () => {
     audioListener = PassiveAudio.addListener("state", (s) => {
-      if (audioMode) playBtn.textContent = s.playing ? "⏸" : "▶";
+      if (!audioMode) return;
+      playBtn.textContent = s.playing ? "⏸" : "▶";
+      if (s.positionMs != null) {
+        audioPosSec = s.positionMs / 1000;
+        if (!scrubbing) {
+          scrub.value = String(audioPosSec);
+          updateClock(audioPosSec);
+        }
+      }
     });
   };
 
@@ -872,12 +889,15 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     video.pause();
     setAudioMode(true);
     playBtn.textContent = "⏸";
+    audioPosSec = video.currentTime;
     try {
       await PassiveAudio.play({
         items: [{ src: fileUri, title: title || episodeId, episodeId }],
         startIndex: 0,
         speed: SPEEDS[speedIdx],
-        startPositionMs: startMs,
+        // < 0 forces the top of the track — 0 would mean "resume from the
+        // service's persisted position", but this is an exact handoff
+        startPositionMs: startMs > 0 ? startMs : -1,
       });
       attachAudioListener();
     } catch (e) {
@@ -940,12 +960,19 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     savePos();
   });
 
-  // prev/next anchor on the last cue that *started* (works in gaps too);
-  // cue-level seeking is a video-mode gesture, so it's inert in audio mode
+  // prev/next anchor on the last cue that *started* (works in gaps too); in
+  // audio mode the anchor is the service's last position tick and the seek
+  // goes over the bridge
   const seekCue = (offset: number) => {
-    if (audioMode || !cues.length) return;
-    const anchor = lastStartedAt(cues, video.currentTime);
+    if (!cues.length) return;
+    const at = audioMode ? audioPosSec : video.currentTime;
+    const anchor = lastStartedAt(cues, at);
     const i = Math.max(0, Math.min(cues.length - 1, (anchor < 0 ? 0 : anchor) + offset));
+    if (audioMode) {
+      audioPosSec = cues[i].start;
+      void PassiveAudio.seekTo({ positionMs: Math.floor(cues[i].start * 1000) }).catch(() => {});
+      return;
+    }
     video.currentTime = cues[i].start;
     showCue(cueIndexAt(cues, video.currentTime));
   };

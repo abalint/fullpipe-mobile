@@ -8,12 +8,15 @@ import { api } from "../api";
 import { buildPlaylist, PassiveAudio } from "../audio";
 import type { PassiveAudioState } from "../audio";
 import { cacheJobs, getCachedJobs } from "../store";
-import { downloadVideo, getVideoRecord } from "../video";
+import { clearPosition, downloadVideo, getVideoRecord, savePosition } from "../video";
+import { fmtClock } from "./player";
 import { fmtDur, isPassive, removeJob, sortJobs, swipeable } from "./queue";
 import type { Job } from "../types";
 
 const SPEED_KEY = "fp.listen.speed";
 const SPEEDS = [0.8, 1, 1.2, 1.5];
+const SLEEP_MINUTES = [0, 15, 30, 45, 60];
+const SKIP_MS = 10_000;
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
   const n = document.createElement(tag);
@@ -41,6 +44,28 @@ export function passiveView(): HTMLElement {
   // --- now-playing bar -------------------------------------------------------
   const bar = el("div", "listenbar");
   const barTitle = el("div", "listenbar-title");
+
+  // seek row: scrubber (ms units) + elapsed / duration clock
+  const seekRow = el("div", "listenbar-seek");
+  const scrub = el("input") as HTMLInputElement;
+  scrub.type = "range";
+  scrub.min = "0";
+  scrub.max = "0";
+  scrub.step = "1000";
+  const clock = el("span", "muted clock", "0:00 / 0:00");
+  seekRow.append(scrub, clock);
+
+  let scrubbing = false;
+  const drawClock = (posMs: number) => {
+    clock.textContent = `${fmtClock(posMs / 1000)} / ${fmtClock((player.durationMs ?? 0) / 1000)}`;
+  };
+  scrub.addEventListener("pointerdown", () => (scrubbing = true));
+  scrub.addEventListener("input", () => drawClock(Number(scrub.value)));
+  scrub.addEventListener("change", () => {
+    scrubbing = false;
+    void PassiveAudio.seekTo({ positionMs: Math.floor(Number(scrub.value)) }).catch(() => {});
+  });
+
   const controls = el("div", "listenbar-controls");
   const btn = (label: string, fn: () => Promise<unknown>): HTMLButtonElement => {
     const b = el("button", "small", label) as HTMLButtonElement;
@@ -49,7 +74,9 @@ export function passiveView(): HTMLElement {
     return b;
   };
   btn("⏮", () => PassiveAudio.previous());
+  btn("-10s", () => PassiveAudio.seekBy({ deltaMs: -SKIP_MS }));
   const playPause = btn("⏸", () => PassiveAudio.toggle());
+  btn("+10s", () => PassiveAudio.seekBy({ deltaMs: SKIP_MS }));
   btn("⏭", () => PassiveAudio.next());
   btn("⏹", () => PassiveAudio.stop());
   const speedSel = el("select", "small") as HTMLSelectElement;
@@ -65,7 +92,21 @@ export function passiveView(): HTMLElement {
       void PassiveAudio.setSpeed({ speed: Number(speedSel.value) }).catch(() => {});
   });
   controls.appendChild(speedSel);
-  bar.append(barTitle, controls);
+
+  // sleep timer: armed in the native service so it fires with the webview dead
+  const sleepSel = el("select", "small") as HTMLSelectElement;
+  for (const m of SLEEP_MINUTES) {
+    const o = el("option", "", m === 0 ? "😴 off" : `😴 ${m}m`) as HTMLOptionElement;
+    o.value = String(m);
+    sleepSel.appendChild(o);
+  }
+  sleepSel.addEventListener("change", () => {
+    if (player.running)
+      void PassiveAudio.setSleepTimer({ minutes: Number(sleepSel.value) }).catch(() => {});
+  });
+  const sleepLeft = el("span", "muted", "");
+  controls.append(sleepSel, sleepLeft);
+  bar.append(barTitle, seekRow, controls);
 
   function renderBar(): void {
     bar.style.display = player.running ? "" : "none";
@@ -73,6 +114,30 @@ export function passiveView(): HTMLElement {
     const cur = jobs.find((j) => j.episode_id === player.episodeId);
     barTitle.textContent = cur?.title || player.episodeId || "";
     playPause.textContent = player.playing ? "⏸" : "▶";
+    const dur = player.durationMs ?? 0;
+    scrub.max = String(dur);
+    scrub.disabled = !dur;
+    if (!scrubbing) {
+      scrub.value = String(player.positionMs ?? 0);
+      drawClock(player.positionMs ?? 0);
+    }
+    const sleepMs = player.sleepRemainingMs ?? 0;
+    sleepLeft.textContent = sleepMs > 0 ? `${Math.ceil(sleepMs / 60_000)}m left` : "";
+    // fired (or cancelled elsewhere): snap the select back to off
+    if (sleepMs <= 0 && sleepSel.value !== "0") sleepSel.value = "0";
+  }
+
+  // keep the video player's resume point in step with passive listening, so
+  // the "watch" escape hatch reopens where the audio left off (the service
+  // persists its own copy natively for screen-off stretches)
+  let lastPosSaveAt = 0;
+  function syncSavedPosition(s: PassiveAudioState): void {
+    if (!s.running || !s.episodeId || s.positionMs == null) return;
+    const now = Date.now();
+    if (now - lastPosSaveAt < 5000) return;
+    lastPosSaveAt = now;
+    if (s.durationMs && s.positionMs > s.durationMs - 10_000) clearPosition(s.episodeId);
+    else if (s.positionMs > 5000) savePosition(s.episodeId, s.positionMs / 1000);
   }
 
   /** Start background playback over every downloaded passive episode,
@@ -195,14 +260,19 @@ export function passiveView(): HTMLElement {
   root.append(toolbar, bar, status, list);
 
   // live state from the service → highlight + bar; self-detaches when the
-  // router swaps this view out
+  // router swaps this view out. While playing this ticks every second, so
+  // only rebuild the row list when the playing episode actually changes —
+  // ticks just move the scrubber/clock.
   const listener = PassiveAudio.addListener("state", (s) => {
     if (!root.isConnected) {
       void listener.then((h) => h.remove());
       return;
     }
+    const structural = s.running !== player.running || s.episodeId !== player.episodeId;
     player = s;
-    render();
+    syncSavedPosition(s);
+    if (structural) render();
+    else renderBar();
   });
   void PassiveAudio.getState()
     .then((s) => {

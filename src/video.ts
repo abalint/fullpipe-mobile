@@ -7,6 +7,9 @@
 
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { api } from "./api";
+// import cycle with audio.ts is fine — both sides only touch the other's
+// exports inside function bodies, never at module init
+import { PassiveAudio } from "./audio";
 import { cachePrep, getSettings } from "./store";
 import type { Definitions, TranscriptDoc } from "./types";
 
@@ -33,10 +36,17 @@ export function getPosition(ep: string): number | null {
 
 export function savePosition(ep: string, seconds: number): void {
   localStorage.setItem(posKey(ep), String(seconds));
+  // mirror into the passive service's native resume store so video watching
+  // and audio listening agree on "where you left off" (no-op on web)
+  void PassiveAudio.setSavedPosition({
+    episodeId: ep,
+    positionMs: Math.floor(seconds * 1000),
+  }).catch(() => {});
 }
 
 export function clearPosition(ep: string): void {
   localStorage.removeItem(posKey(ep));
+  void PassiveAudio.setSavedPosition({ episodeId: ep, positionMs: 0 }).catch(() => {});
 }
 
 export function getVideoRecord(ep: string): VideoRecord | null {
