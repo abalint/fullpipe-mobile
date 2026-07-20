@@ -47,6 +47,7 @@ interface PassiveAudioPlugin {
   seekBy(opts: { deltaMs: number }): Promise<void>;
   setSleepTimer(opts: { minutes: number }): Promise<void>; // 0 cancels
   setSavedPosition(opts: { episodeId: string; positionMs: number }): Promise<void>; // ≤0 clears
+  getLastEpisode(): Promise<{ episodeId?: string }>; // queue memory; works with the service dead
   getState(): Promise<PassiveAudioState>;
   addListener(
     eventName: "state",
@@ -55,6 +56,19 @@ interface PassiveAudioPlugin {
 }
 
 export const PassiveAudio = registerPlugin<PassiveAudioPlugin>("PassiveAudio");
+
+/** Where playback should begin: an explicitly tapped episode wins, else the
+    remembered last-played episode (the queue's memory), else the top. An
+    episode that's gone from the list (deleted, unshelved) falls to the top. */
+export function resolveStartIndex(
+  items: PassiveTrack[],
+  fromEp?: string,
+  lastEp?: string,
+): number {
+  const want = fromEp ?? lastEp;
+  const i = want ? items.findIndex((t) => t.episodeId === want) : -1;
+  return i >= 0 ? i : 0;
+}
 
 /** Playlist from the passive jobs that have a local download, list order
     preserved. Episodes without a download are skipped (the view flags them). */

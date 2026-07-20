@@ -56,6 +56,9 @@ public class PassiveAudioService extends Service {
     /** Per-episode resume positions (ms) — also written by the plugin so the
         webview's saved positions and ours stay one store. */
     static final String POSITIONS_PREFS = "fp_passive_positions";
+    /** Reserved key in {@link #POSITIONS_PREFS}: the episode last loaded for
+        playback — the queue's memory. Episode ids never start with "__". */
+    static final String LAST_EPISODE_KEY = "__last_episode";
     /** Below this there's nothing worth resuming; above duration−this the
         track counts as finished and restarts from the top next time. */
     private static final long RESUME_MIN_MS = 5_000;
@@ -300,6 +303,9 @@ public class PassiveAudioService extends Service {
         if (tracks.isEmpty()) return;
         index = ((i % tracks.size()) + tracks.size()) % tracks.size();
         Track track = tracks.get(index);
+        // remember where in the queue we are, so the next "play all" resumes
+        // here instead of the top (survives stop and process death)
+        positions.edit().putString(LAST_EPISODE_KEY, track.episodeId).apply();
         player = new MediaPlayer();
         player.setAudioAttributes(new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)

@@ -183,6 +183,20 @@ public class PassiveAudioPlugin extends Plugin {
         call.resolve();
     }
 
+    /** The episode the queue last had loaded — its memory. Read straight from
+        prefs so it works with the service dead; play() uses it to pick up
+        where listening left off. */
+    @PluginMethod
+    public void getLastEpisode(PluginCall call) {
+        android.content.SharedPreferences prefs = getContext()
+                .getSharedPreferences(PassiveAudioService.POSITIONS_PREFS,
+                        android.content.Context.MODE_PRIVATE);
+        String ep = prefs.getString(PassiveAudioService.LAST_EPISODE_KEY, null);
+        JSObject o = new JSObject();
+        if (ep != null) o.put("episodeId", ep);
+        call.resolve(o);
+    }
+
     @PluginMethod
     public void getState(PluginCall call) {
         call.resolve(state());

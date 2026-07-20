@@ -5,7 +5,7 @@
 // and swipe-to-delete is the exact same delete the queue rows use.
 
 import { api } from "../api";
-import { buildPlaylist, PassiveAudio } from "../audio";
+import { buildPlaylist, PassiveAudio, resolveStartIndex } from "../audio";
 import type { PassiveAudioState } from "../audio";
 import { cacheJobs, getCachedJobs } from "../store";
 import { clearPosition, downloadVideo, getVideoRecord, savePosition } from "../video";
@@ -38,6 +38,9 @@ export function passiveView(): HTMLElement {
   let jobs: Job[] = [];
   let offline = false;
   let player: PassiveAudioState = { running: false, playing: false, index: -1 };
+  // the queue's memory: the episode the service last had loaded — "play all"
+  // resumes here (kept natively, so it survives app restarts)
+  let lastEp: string | undefined;
 
   const passiveJobs = () => sortJobs(jobs.filter(isPassive), "newest");
 
@@ -141,17 +144,16 @@ export function passiveView(): HTMLElement {
   }
 
   /** Start background playback over every downloaded passive episode,
-      beginning at `fromEp` (default: the top of the list). */
+      beginning at `fromEp` (default: where the queue left off, else the top). */
   async function play(fromEp?: string): Promise<void> {
     const items = await buildPlaylist(passiveJobs());
     if (!items.length) {
       alert("Nothing downloaded to play — tap ⬇ on an episode first.");
       return;
     }
-    const start = fromEp ? items.findIndex((t) => t.episodeId === fromEp) : 0;
     await PassiveAudio.play({
       items,
-      startIndex: Math.max(0, start),
+      startIndex: resolveStartIndex(items, fromEp, lastEp),
       speed: savedSpeed(),
     });
   }
@@ -228,6 +230,12 @@ export function passiveView(): HTMLElement {
     list.textContent = "";
     for (const j of rows)
       list.appendChild(swipeable(jobRow(j), () => void removeJob(j, () => void load(), offline)));
+    // memory of a still-playable episode → "play all" is really a resume
+    playAll.textContent = rows.some(
+      (j) => j.episode_id === lastEp && getVideoRecord(j.episode_id),
+    )
+      ? "▶ resume"
+      : "▶ play all";
     renderBar();
   }
 
@@ -272,6 +280,7 @@ export function passiveView(): HTMLElement {
     }
     const structural = s.running !== player.running || s.episodeId !== player.episodeId;
     player = s;
+    if (s.episodeId) lastEp = s.episodeId; // mirror the service's queue memory
     syncSavedPosition(s);
     if (structural) render();
     else renderBar();
@@ -280,6 +289,12 @@ export function passiveView(): HTMLElement {
     .then((s) => {
       player = s;
       renderBar();
+    })
+    .catch(() => {});
+  void PassiveAudio.getLastEpisode()
+    .then(({ episodeId }) => {
+      lastEp = episodeId;
+      render();
     })
     .catch(() => {});
 
