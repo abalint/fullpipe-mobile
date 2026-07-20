@@ -780,6 +780,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
         !cue?.grammar?.length && !cue?.phrases?.length)
       pop.appendChild(el("div", "gp-none", "no dictionary entry"));
     pop.style.display = "";
+    pop.scrollTop = 0; // the card scrolls when clamped — don't inherit the last word's position
   };
   pop.addEventListener("click", (e) => e.stopPropagation()); // reading ≠ pause
 
