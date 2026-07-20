@@ -53,6 +53,16 @@ export function isPassive(job: Job): boolean {
   return pending ?? !!job.passive;
 }
 
+/** Unwatched seconds sitting on this tab. Counts exactly the rows the queue
+    lists: passive-shelved episodes belong to the Listen tab, and an episode
+    marked watched in the outbox is done even though the snapshot is stale. */
+export function backlogSeconds(jobs: Job[]): number {
+  return jobs
+    .filter((j) => !isPassive(j) && !pendingWatched(j.episode_id))
+    .filter((j) => STAGED_UNWATCHED.includes(j.state))
+    .reduce((sum, j) => sum + (j.duration ?? 0), 0);
+}
+
 /** Seconds → hh:mm:ss for the unwatched-backlog readout. */
 export function hms(seconds: number): string {
   const s = Math.round(seconds);
@@ -683,9 +693,7 @@ export function queueView(): HTMLElement {
   function render(): void {
     if (!offline) status.textContent = jobs.some((j) => !isPassive(j)) ? "" : "queue is empty";
     list.textContent = "";
-    const total = jobs
-      .filter((j) => STAGED_UNWATCHED.includes(j.state))
-      .reduce((sum, j) => sum + (j.duration ?? 0), 0);
+    const total = backlogSeconds(jobs);
     backlog.textContent = total > 0 ? hms(total) : "";
     const rerender = () => void load();
     const onRatingTouch = () => (lastRatingTouch = Date.now());

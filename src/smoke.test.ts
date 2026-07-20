@@ -16,6 +16,7 @@ import {
   pendingTapCount,
   pendingWatched,
   queueEnqueue,
+  queuePassive,
   queueRating,
   queueWatched,
   removeEpisodeActions,
@@ -24,7 +25,7 @@ import {
 } from "./store";
 import { flushOutbox } from "./sync";
 import { api, ApiError } from "./api";
-import { hms, sortJobs, starBar } from "./views/queue";
+import { backlogSeconds, hms, sortJobs, starBar } from "./views/queue";
 import { statsView } from "./views/stats";
 import { confirmView } from "./views/confirm";
 import { cacheStats } from "./store";
@@ -455,6 +456,38 @@ describe("hms", () => {
     expect(hms(838.759)).toBe("00:13:59");
     expect(hms(3600 + 25 * 60 + 10)).toBe("01:25:10");
     expect(hms(10 * 3600)).toBe("10:00:00");
+  });
+});
+
+describe("backlogSeconds", () => {
+  const job = (episode_id: string, extra: Partial<Job>): Job =>
+    ({ episode_id, source: "s", state: "staged", duration: 600, ...extra }) as Job;
+
+  it("sums unwatched staged and reconciled episodes", () => {
+    expect(
+      backlogSeconds([
+        job("a", {}),
+        job("b", { state: "reconciled", duration: 300 }),
+        job("c", { state: "watched" }), // done
+        job("d", { state: "prepared" }), // still in stage 1, not staged yet
+        job("e", { duration: null }), // duration unknown
+      ]),
+    ).toBe(900);
+  });
+
+  it("excludes passive-shelved episodes — they live on the Listen tab", () => {
+    expect(backlogSeconds([job("a", {}), job("b", { passive: true })])).toBe(600);
+  });
+
+  it("excludes an episode shelved offline, before the outbox flushes", () => {
+    // the row is already gone from the queue list; the total must follow it
+    queuePassive("b", true);
+    expect(backlogSeconds([job("a", {}), job("b", {})])).toBe(600);
+  });
+
+  it("excludes an episode marked watched offline, while the state is stale", () => {
+    queueWatched("b", false);
+    expect(backlogSeconds([job("a", {}), job("b", {})])).toBe(600);
   });
 });
 
