@@ -15,7 +15,9 @@
 // Word highlighting is text-color-only (no backgrounds over video) and
 // tiered — off / focus (keywords + high-value + i+1 target) / learn (+ all
 // unknown words) / all (+ every corpus-tracked word) — with a "+1" badge on
-// i+1 lines. The Aa panel holds size / height / tier prefs (global, like the
+// i+1 lines. Cutting across the tiers, the ledger's "think you know" queue
+// (words whose exposures cleared the bar, awaiting a yes/no) paints light
+// blue wherever it lands, at any tier but off. The Aa panel holds size / height / tier prefs (global, like the
 // cc mode). Custom controls (audio/video toggle, prev / next line, speed,
 // furigana, fullscreen), resume position, wake lock while playing. The 🎧
 // toggle hands the current position off to the native passive-audio service
@@ -26,10 +28,13 @@ import type { PluginListenerHandle } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { api } from "../api";
 import { PassiveAudio } from "../audio";
-import { compoundKeysAt } from "../compounds";
-import { inflectionAt } from "../inflection";
-import { rubyWord, segsNode, tokenSpan } from "../prep-render";
-import { cachePrep, cycleTap, getCachedPrep, getTaps } from "../store";
+import { createGlossPopup } from "../gloss-popup";
+import type { KeywordInfo } from "../gloss-popup";
+import { confirmList, NO_CONFIRM } from "../lists";
+import { applyKnown, confirmFrom, fetchPaint, getCachedPaint, knownFor } from "../paint";
+import { tokenSpan } from "../prep-render";
+import { cachePrep, getCachedJobs, getCachedPrep, getTaps } from "../store";
+import { ViewRecorder } from "../viewtime";
 import {
   clearPosition,
   getPosition,
@@ -42,14 +47,17 @@ import {
 } from "../video";
 import type {
   Definitions,
-  GlossEntry,
+  PaintState,
   PrepDoc,
-  Segs,
   SentenceGrammar,
   SentencePhrase,
   TapMark,
   Token,
 } from "../types";
+
+// the popup card is shared with the page reader now — re-exported so existing
+// imports (tests, tokenHighlight callers) keep working
+export type { KeywordInfo } from "../gloss-popup";
 
 /** One subtitle cue: tokenized (tappable) or plain text (SRT fallback). */
 export interface Cue {
@@ -313,7 +321,9 @@ export function isIplus1(c: Cue): boolean {
 /** Word-level highlight class for a token at a tier, or null.
     Priority: curated keyword > i+1 target (targets are usually candidates
     too — the special i+1 emphasis must win) > reinforcement target >
-    high-value candidate > unknown > corpus-tracked. */
+    think-you-know > high-value candidate > unknown > corpus-tracked. The
+    think-you-know hue outranks the episode-local ones: "the ledger is about
+    to call this known" is a fact about the user, not about this episode. */
 export function tokenHighlight(
   t: Token,
   tier: SubTier,
@@ -321,6 +331,7 @@ export function tokenHighlight(
   highValue: Set<string>,
   target: string | null,
   cls?: string,
+  confirm?: ReadonlySet<string>,
 ): string | null {
   if (tier === "off" || !t.c || !t.l) return null;
   if (keywords.has(t.l)) return "kw";
@@ -331,17 +342,13 @@ export function tokenHighlight(
     if (cls !== "reinforcement") return "hl-target";
     if (learn) return "hl-lrn";
   }
+  // the confirm queue is standing user state, not this episode's arithmetic
+  // — it paints at every tier but off
+  if (confirm?.has(t.l)) return "hl-know";
   if (highValue.has(t.l)) return "hl-hv";
   if (learn && !t.k) return "hl-unk";
   if (tier === "all" && t.f != null) return "hl-corpus";
   return null;
-}
-
-/** What the player knows about a noted word: its glossary row + the focal
-    point's "why", when the curate pass flagged it. */
-export interface KeywordInfo {
-  entry: GlossEntry;
-  why?: Segs;
 }
 
 /** lemma → gloss/notes for the prep doc's *noted* words: glossary rows the
@@ -360,6 +367,11 @@ export function keywordIndex(doc: PrepDoc | null): Map<string, KeywordInfo> {
     else map.set(fp.word, { entry: { lemma: fp.word }, why: fp.why_segs });
   }
   return map;
+}
+
+/** Curated grammar patterns on this cue that sit in the confirm queue. */
+export function cueGrammarConfirm(c: Cue, grammarConfirm: ReadonlySet<string>): string[] {
+  return (c.grammar ?? []).map((g) => g.pattern).filter((p) => grammarConfirm.has(p));
 }
 
 /** kw-mode gate: does this line carry a noted keyword or a ★-marked word? */
@@ -385,18 +397,29 @@ export function fmtClock(sec: number): string {
     the player then tries a background refresh. */
 async function loadTokenCues(
   ep: string,
-): Promise<{ cues: Cue[]; candidates: string[]; curated: boolean } | null> {
+): Promise<{
+  cues: Cue[];
+  candidates: string[];
+  confirm: ReadonlySet<string>;
+  curated: boolean;
+} | null> {
   const local = await loadLocalTranscript(ep);
   if (local?.sentences?.length)
     return {
       cues: local.sentences,
       candidates: local.candidates ?? [],
+      confirm: confirmList(local),
       curated: local.curated ?? false,
     };
   try {
     const doc = await api.getTranscript(ep);
     if (doc.sentences?.length)
-      return { cues: doc.sentences, candidates: doc.candidates ?? [], curated: true };
+      return {
+        cues: doc.sentences,
+        candidates: doc.candidates ?? [],
+        confirm: confirmList(doc),
+        curated: true,
+      };
   } catch {
     /* endpoint missing / unreachable — fall through to SRT */
   }
@@ -425,21 +448,47 @@ const SPEEDS = [1, 1.25, 1.5, 0.75];
 
 export function playerView(episodeId: string, startAt?: number): HTMLElement {
   const root = el("div", "view player-view");
-  const title = getCachedPrep(episodeId)?.episode.title;
+  const title =
+    getCachedPrep(episodeId)?.episode.title ||
+    getCachedJobs()?.jobs.find((j) => j.episode_id === episodeId)?.title;
   if (title) root.appendChild(el("h1", "", title));
+
+  // immersion time (viewtime.ts): every timeupdate tick feeds the recorder;
+  // seeks re-anchor, rewinds count again, and the sitting closes on leave —
+  // or on the 🎧 handoff, after which the native service logs it (still as
+  // watching: audio-only here is not the passive queue)
+  const recorder = new ViewRecorder({ episodeId, title: title || episodeId, kind: "watch" });
 
   const stage = el("div", "player-stage");
   const video = el("video") as HTMLVideoElement;
   video.playsInline = true;
   video.preload = "metadata";
   const overlay = el("div", "subs-overlay");
-  const pop = el("div", "gloss-pop");
-  pop.style.display = "none";
-  stage.append(video, overlay, pop);
+  const popup = createGlossPopup({
+    episodeId,
+    defs: () => defs,
+    keywords: () => keywords,
+    grammarConfirm: () => grammarConfirm,
+    onMarkChanged: () => paintTaps(),
+  });
+  stage.append(video, overlay, popup.el);
 
   // high-value lemmas for the focus tier: the transcript's ranked candidates,
   // else (old sidecar) the prep glossary — keywords win priority either way
   let highValue = new Set<string>();
+  // the ledger's think-you-know queue for this episode — the live paint
+  // state's list when we have one, else the transcript's snapshot
+  let confirm: ReadonlySet<string> = NO_CONFIRM;
+  // curated line patterns in the grammar half of that queue (line badge)
+  let grammarConfirm: ReadonlySet<string> = NO_CONFIRM;
+  // paint.ts: the ledger's lists as of now, overlaid on the cached sidecar
+  // (known is additive; confirm/interest/grammar replace the snapshot)
+  let paint: PaintState | null = getCachedPaint(episodeId);
+  const applyPaint = (doc: { confirm?: string[] } | null) => {
+    applyKnown(cues, knownFor(paint));
+    confirm = confirmFrom(paint, doc as never);
+    grammarConfirm = new Set(paint?.grammar_confirm ?? []);
+  };
   const fallbackHighValue = (doc: PrepDoc | null) => {
     if (!highValue.size && doc) highValue = new Set(doc.glossary.map((g) => g.lemma));
   };
@@ -605,12 +654,19 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     const target = soleUnknown(c);
     if (tier !== "off" && isIplus1(c) && k === badgeLine)
       line.appendChild(el("span", "iplus-badge", "+1"));
+    // a grammar point on this line is waiting for your yes/no (blue, like a
+    // word in the same queue) — badge the first line; tap any word for it
+    if (tier !== "off" && k === 0 && cueGrammarConfirm(c, grammarConfirm).length) {
+      const b = el("span", "know-badge", "?");
+      b.title = "grammar point on this line — do you know it? (Progress tab)";
+      line.appendChild(b);
+    }
     for (const t of chunk) {
       const n = tokenSpan(t, null, true); // any word answers a tap
       if (n instanceof HTMLElement) {
         // index within the cue's full token list → inflection-chain lookup
         n.dataset.ti = String(c.tokens!.indexOf(t));
-        const hl = tokenHighlight(t, tier, keywords, highValue, target, c.cls);
+        const hl = tokenHighlight(t, tier, keywords, highValue, target, c.cls, confirm);
         if (hl) n.classList.add(hl);
       }
       line.appendChild(n);
@@ -676,121 +732,17 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   };
   const repaintCue = () => showCue(cueIndexAt(cues, video.currentTime));
 
-  // --- any-word popup: curated gloss/notes on top, JMdict senses below,
-  // with the mark cycle inside (marks land in the shared tap store) ---------
-  const hidePop = () => (pop.style.display = "none");
-  const markLabel = (m: TapMark | undefined) =>
-    m === "k" ? "known ✓" : m === "h" ? "interest ★" : "mark";
-  const showPopup = (lemma: string, ti?: number) => {
-    const info = keywords.get(lemma);
-    const entries = defs[lemma] ?? [];
-    pop.textContent = "";
-    const head = el("div", "gp-head");
-    head.appendChild(rubyWord(lemma, info?.entry.reading ?? entries[0]?.r[0]));
-    const mark = el("button", "gp-mark", markLabel(getTaps(episodeId)[lemma])) as HTMLButtonElement;
-    mark.addEventListener("click", (e) => {
-      e.stopPropagation();
-      mark.textContent = markLabel(cycleTap(episodeId, lemma));
-      paintTaps();
-    });
-    head.appendChild(mark);
-    pop.appendChild(head);
-    // how the tapped word is conjugated HERE — deterministic from the
-    // token chain (inflection.ts), so it works on every line, not just
-    // curated ones
-    const cueTokens = cues[current]?.tokens ?? [];
-    const infl = ti != null ? inflectionAt(cueTokens, ti) : null;
-    if (infl && (infl.parts.length > 1 || infl.surface !== infl.lemma)) {
-      const row = el("div", "gp-inflect");
-      row.appendChild(el("span", "gp-surface", infl.surface));
-      row.appendChild(document.createTextNode(" ＝ "));
-      infl.parts.forEach((p, i) => {
-        if (i) row.appendChild(document.createTextNode(" ＋ "));
-        row.appendChild(el("span", "gp-part", p.text));
-        if (p.label) row.appendChild(el("span", "gp-part-label", `〔${p.label}〕`));
-      });
-      pop.appendChild(row);
-    }
-    // compounds/expressions this token is part of (帝王切開, そういう) —
-    // the server pre-validated the runs; we just probe the joined keys
-    const compounds = (ti != null ? compoundKeysAt(cueTokens, ti) : [])
-      .filter((k) => k !== lemma && defs[k])
-      .slice(0, 2);
-    for (const key of compounds) {
-      const d = el("div", "gp-dict gp-compound");
-      d.appendChild(el("span", "gp-tag", "compound"));
-      d.appendChild(el("span", "gp-pattern", key));
-      const entry = defs[key][0];
-      if (entry.r[0] && entry.r[0] !== key)
-        d.appendChild(el("span", "gp-reading", ` ${entry.r[0]}`));
-      for (const sense of entry.s.slice(0, 2)) {
-        const line = el("div", "gp-sense");
-        if (sense.pos.length) line.appendChild(el("span", "gp-pos", sense.pos[0]));
-        line.appendChild(document.createTextNode(sense.g.slice(0, 4).join("; ")));
-        d.appendChild(line);
-      }
-      pop.appendChild(d);
-    }
-    // the curate pass's own gloss/note/why lead — they're episode-specific
-    if (info?.entry.gloss) pop.appendChild(el("div", "gp-gloss", info.entry.gloss));
-    if (info?.entry.note_segs?.length) {
-      const note = el("div", "gp-note");
-      note.appendChild(segsNode(info.entry.note_segs));
-      pop.appendChild(note);
-    }
-    if (info?.why?.length) {
-      const why = el("div", "gp-why");
-      why.appendChild(segsNode(info.why));
-      pop.appendChild(why);
-    }
-    // dictionary senses (capped — this is a glance, not a dictionary page)
-    for (const entry of entries.slice(0, 2)) {
-      const d = el("div", "gp-dict");
-      // curate-authored definition (word JMdict lacks) — label the source
-      if (entry.ai) d.appendChild(el("span", "gp-tag", "curated"));
-      // header already shows the first entry's reading
-      if (entry !== entries[0]) d.appendChild(el("span", "gp-reading", entry.r[0] ?? ""));
-      for (const sense of entry.s.slice(0, 3)) {
-        const line = el("div", "gp-sense");
-        if (sense.pos.length) line.appendChild(el("span", "gp-pos", sense.pos[0]));
-        line.appendChild(document.createTextNode(sense.g.slice(0, 4).join("; ")));
-        d.appendChild(line);
-      }
-      pop.appendChild(d);
-    }
-    // the line's curated grammar patterns + phrases (GRAMMAR.md) — they
-    // belong to the sentence, not one token, so any word tap surfaces them
-    const cue = cues[current];
-    for (const g of cue?.grammar ?? []) {
-      const row = el("div", "gp-line-note");
-      row.appendChild(el("span", "gp-tag", g.proposed ? "grammar?" : "grammar"));
-      row.appendChild(el("span", "gp-pattern", g.pattern));
-      if (g.note) row.appendChild(document.createTextNode(` — ${g.note}`));
-      pop.appendChild(row);
-    }
-    for (const p of cue?.phrases ?? []) {
-      const row = el("div", "gp-line-note");
-      row.appendChild(el("span", "gp-tag", "phrase"));
-      row.appendChild(el("span", "gp-pattern", p.canonical));
-      if (p.surface && p.surface !== p.canonical)
-        row.appendChild(document.createTextNode(` — here: ${p.surface}`));
-      pop.appendChild(row);
-    }
-    if (!info && !entries.length && !infl && !compounds.length &&
-        !cue?.grammar?.length && !cue?.phrases?.length)
-      pop.appendChild(el("div", "gp-none", "no dictionary entry"));
-    pop.style.display = "";
-    pop.scrollTop = 0; // the card scrolls when clamped — don't inherit the last word's position
-  };
-  pop.addEventListener("click", (e) => e.stopPropagation()); // reading ≠ pause
-
-  // tap any word → definition popup (marking moved inside it, so the popup
-  // is the one gesture for both looking up and marking)
+  // tap any word → the shared gloss popup (gloss-popup.ts): curated notes,
+  // inflection, compounds, JMdict senses, and the mark cycle all live there
   overlay.addEventListener("click", (e) => {
     const w = (e.target as HTMLElement).closest<HTMLElement>(".w[data-lemma]");
     if (!w) return;
     e.stopPropagation(); // don't fall through to the stage's play/pause toggle
-    showPopup(w.dataset.lemma!, w.dataset.ti != null ? Number(w.dataset.ti) : undefined);
+    popup.show(
+      w.dataset.lemma!,
+      w.dataset.ti != null ? Number(w.dataset.ti) : undefined,
+      cues[current],
+    );
   });
 
   void (async () => {
@@ -799,7 +751,16 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       if (tokenized) {
         cues = extendCues(tokenized.cues);
         highValue = new Set(tokenized.candidates);
+        applyPaint({ confirm: [...tokenized.confirm] });
         fallbackHighValue(getCachedPrep(episodeId));
+        // then the live lists: what's become known / entered the confirm
+        // queue since this sidecar was pulled — repaint if the server answers
+        void fetchPaint(episodeId).then((fresh) => {
+          if (!fresh || !root.isConnected) return;
+          paint = fresh;
+          applyPaint({ confirm: [...confirm] });
+          repaintCue();
+        });
         if (!tokenized.curated || sidecarsOutdated(episodeId)) {
           // sidecar was downloaded pre-curation (no grammar/phrase notes, no
           // curate-authored defs) or on an old wire format (e.g. content-
@@ -808,6 +769,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
             if (!fresh?.curated || !root.isConnected) return;
             cues = extendCues(fresh.sentences);
             highValue = new Set(fresh.candidates ?? []);
+            applyPaint(fresh);
             fallbackHighValue(getCachedPrep(episodeId));
             defs = (await loadLocalDefinitions(episodeId)) ?? defs;
             repaintCue();
@@ -875,11 +837,13 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     }
     if (!scrubbing) scrub.value = String(video.currentTime);
     updateClock();
+    recorder.tick(video.currentTime, video.playbackRate, video.duration);
     if (Math.abs(video.currentTime - lastSaved) > 5) {
       lastSaved = video.currentTime;
       savePos();
     }
   });
+  video.addEventListener("seeking", () => recorder.reanchor());
 
   scrub.addEventListener("pointerdown", () => (scrubbing = true));
   scrub.addEventListener("input", () => {
@@ -933,6 +897,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     }
     const startMs = Math.floor(video.currentTime * 1000);
     video.pause();
+    recorder.close(); // from here the service keeps the time — still as watching
     setAudioMode(true);
     playBtn.textContent = "⏸";
     audioPosSec = video.currentTime;
@@ -944,6 +909,9 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
         // < 0 forces the top of the track — 0 would mean "resume from the
         // service's persisted position", but this is an exact handoff
         startPositionMs: startMs > 0 ? startMs : -1,
+        // audio-only is still this episode being actively followed, not
+        // the passive queue — its minutes stay on the watching side
+        kind: "watch",
       });
       attachAudioListener();
     } catch (e) {
@@ -994,8 +962,8 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   playBtn.addEventListener("click", togglePlay);
   stage.addEventListener("click", (e) => {
     if ((e.target as HTMLElement).closest(".w")) return; // word tap, not pause
-    if (pop.style.display !== "none") {
-      hidePop(); // first tap-away just closes the popup
+    if (popup.visible) {
+      popup.hide(); // first tap-away just closes the popup
       return;
     }
     togglePlay();
@@ -1085,8 +1053,10 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   const onResize = () => repaintCue();
   window.addEventListener("resize", onResize);
   const onVisibility = () => {
-    if (document.hidden) savePos();
-    else if (!video.paused) void acquireWake(); // the lock drops when backgrounded
+    if (document.hidden) {
+      savePos();
+      recorder.checkpoint(); // Android may kill the webview while we're away
+    } else if (!video.paused) void acquireWake(); // the lock drops when backgrounded
   };
   document.addEventListener("visibilitychange", onVisibility);
 
@@ -1095,6 +1065,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   // point (it plays on in the background); we only drop our state listener.
   const cleanup = () => {
     savePos();
+    recorder.close();
     video.pause();
     video.removeAttribute("src");
     video.load();

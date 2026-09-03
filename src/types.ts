@@ -18,6 +18,9 @@ export interface Job {
   episode_id: string;
   source: string;
   title?: string;
+  /** "page" rows (page_ id prefix server-side) live on the Pages tab and are
+      read, not played; absent (pre-pages server) means episode. */
+  kind?: "episode" | "page";
   state: JobState;
   passive?: boolean; // shelved into the passive-listening collection
   debrief?: boolean; // queued for a post-watch /debrief conversation (delete blocked while set)
@@ -84,7 +87,27 @@ export interface TranscriptDoc {
       definitions) are included. Absent/false → sidecar refresh will retry. */
   curated?: boolean;
   candidates?: string[]; // ranked high-value lemmas (absent on old sidecars)
+  /** The ledger's "we think you know this" queue, narrowed to the lemmas
+      that appear here (absent on old sidecars) — painted blue in the player
+      and the page reader (src/lists.ts). */
+  confirm?: string[];
+  /** The standing "want to learn" set, same narrowing. On the wire but not
+      painted: ★-tapped words already show through the tap store. */
+  interest?: string[];
   sentences: TranscriptSentence[];
+}
+
+/** GET /episodes/{id}/paint — the ledger's lists as of now, narrowed to one
+    episode (paint.ts). `known` is additive over the sidecar's frozen token
+    flags; the rest replace the sidecar's snapshot lists. `grammar_confirm`
+    holds curated line patterns awaiting a "do you know this?". */
+export interface PaintState {
+  episode_id: string;
+  known: string[];
+  confirm: string[];
+  interest: string[];
+  grammar_confirm: string[];
+  at: string;
 }
 
 /** One JMdict sense/entry, compact wire form (tools/jmdict.py). */
@@ -101,6 +124,30 @@ export interface DictEntry {
 
 /** GET /definitions/{id} — lemma → JMdict entries for the episode's words. */
 export type Definitions = Record<string, DictEntry[]>;
+
+/** One 5ch post in a page doc (server tools/pages.py). `lines` are the
+    post's own line breaks, each a run of sentence idxs into the transcript's
+    sentence track (empty run = blank line). */
+export interface PagePost {
+  n: number;
+  name: string;
+  date: string;
+  uid: string;
+  replies_to: number[];
+  lines: number[][];
+}
+
+/** GET /page/{id} — the reader's post structure; token data rides in the
+    transcript sidecar (same endpoint as the player's). */
+export interface PageDoc {
+  episode_id: string;
+  title: string;
+  url: string;
+  site?: string;
+  board?: string;
+  post_count: number;
+  posts: PagePost[];
+}
 
 export interface GlossEntry {
   lemma: string;
@@ -224,6 +271,35 @@ export const FOLLOW_OPTIONS: [state: FollowState, label: string][] = [
   ["more", "More"],
 ];
 
+/** Where playback time was spent: the in-app player (active watching) or
+    the background passive-audio service (passive listening). Kept apart —
+    they are different kinds of exposure. */
+export type ViewKind = "watch" | "listen";
+
+/** Where a sitting came from: recorded by the app (absent = app), typed in
+    by hand on the Progress tab, or imported from the pre-app spreadsheet
+    on the PC. Only manual entries can be deleted from the phone. */
+export type ViewSource = "app" | "manual" | "import";
+
+/** One recorded playback session (MOBILE.md — viewing time). `secs` is
+    wall-clock seconds spent actually playing: a rewound stretch counts
+    again, a pause counts nothing. `reached` (furthest media position seen)
+    against `duration` says whether the episode was finished. `day` is the
+    device-local calendar day the time belongs to; a session that crosses
+    midnight is split. Client-minted `id` makes the server POST replay-safe. */
+export interface ViewSegment {
+  id: string;
+  episode_id: string;
+  title: string;
+  kind: ViewKind;
+  day: string; // YYYY-MM-DD, device-local
+  start: string; // ISO wall-clock start
+  secs: number;
+  reached: number;
+  duration: number | null;
+  source?: ViewSource;
+}
+
 /** One queued offline action. The outbox is FIFO (an episode's taps flush
     before its watched), and every kind is replay-safe server-side: taps
     dedupe on batch_id, ratings on review_id, watched/enqueue are idempotent. */
@@ -242,4 +318,6 @@ export type OutboxAction =
       review_id: string;
     }
   | { id: string; kind: "enqueue"; source: string }
-  | { id: string; kind: "passive"; episode_id: string; passive: boolean };
+  | { id: string; kind: "passive"; episode_id: string; passive: boolean }
+  | { id: string; kind: "viewtime"; segment: ViewSegment }
+  | { id: string; kind: "viewtime_delete"; segment_id: string };

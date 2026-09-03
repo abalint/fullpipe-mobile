@@ -101,8 +101,9 @@ public class PassiveAudioPlugin extends Plugin {
         int start = call.getInt("startIndex", 0);
         float speed = call.getFloat("speed", 1f);
         int startPositionMs = call.getInt("startPositionMs", 0);
+        String kind = call.getString("kind", "listen");
         PassiveAudioService.pendingLoad =
-                new PassiveAudioService.Load(tracks, start, speed, startPositionMs);
+                new PassiveAudioService.Load(tracks, start, speed, startPositionMs, kind);
         Intent i = new Intent(getContext(), PassiveAudioService.class)
                 .setAction(PassiveAudioService.ACTION_LOAD);
         ContextCompat.startForegroundService(getContext(), i);
@@ -195,6 +196,41 @@ public class PassiveAudioPlugin extends Plugin {
         JSObject o = new JSObject();
         if (ep != null) o.put("episodeId", ep);
         call.resolve(o);
+    }
+
+    /** Closed listening segments the service has logged (ListenLog) — the
+        JS side stores them and acks with clearListenLog. Works with the
+        service dead: the log lives in prefs. `open` is the sitting in
+        progress while the service is alive (display only — it closes and
+        lands in `entries` later). */
+    @PluginMethod
+    public void getListenLog(PluginCall call) {
+        JSObject o = new JSObject();
+        try {
+            o.put("entries", new JSArray(ListenLog.snapshot(getContext()).toString()));
+        } catch (JSONException e) {
+            o.put("entries", new JSArray());
+        }
+        PassiveAudioService s = PassiveAudioService.get();
+        JSONObject open = s != null ? s.openListenSegment() : null;
+        if (open != null) {
+            try {
+                o.put("open", new JSObject(open.toString()));
+            } catch (JSONException ignored) {
+            }
+        }
+        call.resolve(o);
+    }
+
+    @PluginMethod
+    public void clearListenLog(PluginCall call) {
+        try {
+            ListenLog.ack(getContext(), ListenLog.idSet(call.getArray("ids")));
+        } catch (JSONException e) {
+            call.reject("bad ids: " + e.getMessage());
+            return;
+        }
+        call.resolve();
     }
 
     @PluginMethod

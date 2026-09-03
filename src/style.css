@@ -4,13 +4,13 @@
 :root {
   --bg: #ffffff; --fg: #1a1a1a; --muted: #777; --card: #f4f4f6;
   --accent: #4a90d9; --know: #2e9e5b; --dunno: #d9544a; --hl: #fff3c4;
-  --border: #e0e0e4;
+  --hl-know: #cfe7fb; --border: #e0e0e4;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #17181c; --fg: #e8e8ea; --muted: #9a9aa2; --card: #23242a;
     --accent: #6aa9e9; --know: #4dbf7f; --dunno: #e9756c; --hl: #4a4020;
-    --border: #33343c;
+    --hl-know: #1d3a52; --border: #33343c;
   }
 }
 * { box-sizing: border-box; }
@@ -55,6 +55,9 @@ h2 { font-size: 1rem; color: var(--muted); margin: 28px 0 10px;
 
 .w { cursor: pointer; border-radius: 4px; padding: 0 1px; }
 .w.unk { background: var(--hl); }
+/* the ledger's "we think you know this; do you?" queue — standing state, not
+   this episode's arithmetic, so it paints wherever the word turns up */
+.w.hl-know { background: var(--hl-know); }
 .w.target { border-bottom: 2px solid var(--accent); font-weight: 600; }
 .w.tap-k { background: color-mix(in srgb, var(--know) 25%, transparent);
            outline: 1px solid var(--know); }
@@ -292,6 +295,72 @@ button.small.on { border-color: var(--accent); color: var(--accent); }
 .confirm-card .cc-actions { display: flex; gap: 8px; margin-top: 10px; }
 .confirm-card .cc-actions button { flex: 1; }
 
+/* immersion time (viewtime.ts): tiles over collapsible Sunday→Saturday
+   weeks; a day block per day with time; one row per episode */
+.weeks { margin-top: 10px; }
+details.week { background: var(--card); border-radius: 12px; margin-bottom: 8px; }
+details.week > summary {
+  display: flex; align-items: baseline; gap: 10px; padding: 10px 14px;
+  cursor: pointer; list-style: none; font-size: .9rem;
+}
+details.week > summary::-webkit-details-marker { display: none; }
+details.week > summary::before { content: "▸"; color: var(--muted); flex: none; }
+details.week[open] > summary::before { content: "▾"; }
+.wk-range { flex: 1; font-weight: 600; }
+.wk-tot { color: var(--muted); font-size: .82rem; white-space: nowrap;
+          font-variant-numeric: tabular-nums; }
+.day { padding: 8px 14px 10px; border-top: 1px solid var(--border); }
+.day-head { display: flex; justify-content: space-between; gap: 10px; font-size: .85rem; }
+.day-name { color: var(--fg); }
+.day-tot { color: var(--muted); font-size: .8rem; white-space: nowrap;
+           font-variant-numeric: tabular-nums; }
+.ep-row { display: flex; gap: 8px; align-items: baseline; font-size: .82rem; margin-top: 4px; }
+.ep-kind { flex: none; width: 1.3em; }
+.ep-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; }
+.ep-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ep-done { color: var(--muted); font-size: .74rem; white-space: nowrap; min-width: 3.6em;
+           text-align: right; }
+.ep-done.finished { color: var(--know); }
+details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: pointer;
+                              padding: 6px 4px; }
+/* hand-typed entries: a pencil and a ✕ (recorded/imported rows have neither) */
+.ep-src { color: var(--muted); font-size: .74rem; }
+.ep-del { border: none; background: none; color: var(--muted); padding: 0 4px;
+          font-size: .9rem; line-height: 1; }
+/* weekly goal card: target · done/left · pace over the open days */
+.goal { background: var(--card); border-radius: 12px; padding: 12px 14px; margin-top: 10px; }
+.goal-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+             margin-bottom: 6px; font-size: .9rem; }
+.goal-target { border: none; background: none; padding: 0; font: inherit; font-weight: 600;
+               color: var(--accent); }
+.goal-done { color: var(--muted); font-size: .82rem; white-space: nowrap;
+             font-variant-numeric: tabular-nums; }
+.goal .freqfill { background: var(--accent); }
+.goal .freqfill.met { background: var(--know); }
+.goal-pace { margin-top: 8px; font-size: .95rem; }
+.goal-note { color: var(--muted); font-size: .72rem; margin-top: 2px; }
+.goal-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px;
+             padding-top: 10px; border-top: 1px solid var(--border); }
+.goal-form label { font-size: .8rem; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.goal-form input[type="number"] { width: 5.5em; padding: 6px 8px; font-size: .9rem; }
+.goal-form .row { display: flex; gap: 8px; }
+/* "＋ add time" form under the tiles */
+.addtime { margin: 10px 0 4px; }
+.addtime-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
+                background: var(--card); border-radius: 12px; padding: 12px 14px; }
+.addtime-form .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.addtime-form label { font-size: .8rem; color: var(--muted); display: flex;
+                      align-items: center; gap: 6px; }
+.addtime-form input[type="date"], .addtime-form input[type="number"] { width: auto;
+  padding: 6px 8px; font-size: .9rem; }
+.addtime-form input[type="number"] { width: 5.5em; }
+.addtime-form .what { font-size: .9rem; padding: 6px 8px; }
+.addtime-form .kind .tag { font-size: .8rem; padding: 4px 12px; }
+.addtime-form .kind .tag.on { color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
 /* small key/value list for the evidence breakdown */
 .kv { display: grid; grid-template-columns: 1fr max-content; gap: 4px 14px;
       font-size: .85rem; }
@@ -353,6 +422,15 @@ button.small.on { border-color: var(--accent); color: var(--accent); }
 .subs-overlay .w.hl-unk { color: #e8907e; }     /* other unknown (dimmed coral) */
 .subs-overlay .w.hl-lrn { color: #ffc94d; }     /* reinforcement — on a young card */
 .subs-overlay .w.hl-corpus { color: #b9cfe8; }  /* known, corpus-tracked (audit) */
+/* "we think you know this" (confirm queue) — no background over video, and a
+   brighter, cooler blue than the pale corpus grey-blue it sits beside */
+.subs-overlay .w.hl-know { background: none; color: #6fd0ff; }
+/* grammar-point-awaiting-confirm line marker: same blue as a think-you-know
+   word, same badge shape as +1 */
+.subs-overlay .know-badge {
+  color: #6fd0ff; font-size: .6em; font-weight: 700;
+  vertical-align: super; margin-right: 4px; user-select: none;
+}
 /* i+1 line marker: a small text-level badge, not a background chip */
 .subs-overlay .iplus-badge {
   color: #8fc6ff; font-size: .6em; font-weight: 700;
@@ -366,7 +444,9 @@ button.small.on { border-color: var(--accent); color: var(--accent); }
 .subs-overlay .w.tap-h { background: none; outline: none; color: #c58fff; }
 .subs-overlay .w.tap-h::after { color: #c58fff; }
 .subs-overlay ruby rt { color: #fff; font-weight: 500; }
-.player-view.no-ruby ruby rt { display: none; }
+/* あ toggle hides furigana on the subtitle line only — the popup card always
+   shows readings (looking a word up IS asking for its reading) */
+.player-view.no-ruby .subs-overlay ruby rt { display: none; }
 
 /* keyword gloss card, floated above the subtitle line */
 .gloss-pop {
@@ -410,6 +490,8 @@ button.small.on { border-color: var(--accent); color: var(--accent); }
 .gloss-pop .gp-tag { color: #c9a7ff; font-size: .72rem; margin-right: 6px;
                      text-transform: lowercase; }
 .gloss-pop .gp-pattern { color: #e8d5ff; font-weight: 600; }
+.gloss-pop .gp-pattern.know { color: #6fd0ff; }
+.gloss-pop .gp-ask { color: #6fd0ff; font-size: .8rem; }
 
 .player-controls { display: flex; flex-direction: column; gap: 4px; }
 .player-controls .row { display: flex; gap: 6px; align-items: center; }
@@ -438,3 +520,37 @@ button.pv.on { border-color: var(--accent); color: var(--accent); }
 .player-view:fullscreen .player-controls button,
 .player-view:fullscreen .clock { background: transparent; color: #ddd;
                                  border-color: #444; }
+
+/* --- Pages tab / 5ch thread reader ------------------------------------- */
+.reader-toolbar { position: sticky; top: 0; z-index: 5; display: flex;
+                  gap: 8px; align-items: center; padding: 8px 0;
+                  background: var(--bg); }
+.reader-toolbar .more { margin-left: auto; }
+.post { background: var(--card); border-radius: 10px; padding: 8px 12px;
+        margin-bottom: 8px; }
+.post.flash { outline: 2px solid var(--accent); }
+.post-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+             font-size: .75rem; color: var(--muted); }
+.post-n { font-weight: 700; color: var(--accent); }
+.post-name { font-weight: 600; color: var(--fg); }
+.post-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.post-reply { font: inherit; font-size: .72rem; padding: 0 8px; border-radius: 99px;
+              border: 1px solid var(--border); background: transparent;
+              color: var(--accent); cursor: pointer; }
+.post-body { margin-top: 2px; line-height: 1.9; overflow-wrap: anywhere; }
+.post-line.blank { height: .6em; }
+/* あ toggle hides furigana in the article only — the popup card always shows
+   readings (same contract as the player) */
+.reader-view.no-ruby .posts ruby rt { display: none; }
+/* highlight toggle: calm the article down — the unknown-word and
+   think-you-know washes go off; the user's own tap marks stay visible
+   (sparse, deliberate) */
+.reader-view.no-hl .posts .w.unk,
+.reader-view.no-hl .posts .w.hl-know { background: none; }
+button.more { display: block; margin: 12px auto 24px; }
+
+/* the shared gloss card, pinned above the bottom nav on scrolling pages
+   (the player anchors it inside its stage instead) */
+.gloss-pop.fixed { position: fixed; left: 50%; transform: translateX(-50%);
+                   bottom: calc(64px + env(safe-area-inset-bottom));
+                   width: min(92%, 480px); max-height: 45vh; z-index: 40; }

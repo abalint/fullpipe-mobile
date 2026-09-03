@@ -24,6 +24,7 @@ import {
   removeEpisodeActions,
 } from "../store";
 import { flushOutbox } from "../sync";
+import { isPageSource } from "../pages";
 import {
   deleteVideo,
   downloadVideo,
@@ -54,13 +55,24 @@ export function isPassive(job: Job): boolean {
 }
 
 /** Unwatched seconds sitting on this tab. Counts exactly the rows the queue
-    lists: passive-shelved episodes belong to the Listen tab, and an episode
-    marked watched in the outbox is done even though the snapshot is stale. */
+    lists: passive-shelved episodes belong to the Listen tab, page jobs to the
+    Pages tab, and an episode marked watched in the outbox is done even though
+    the snapshot is stale. */
 export function backlogSeconds(jobs: Job[]): number {
   return jobs
-    .filter((j) => !isPassive(j) && !pendingWatched(j.episode_id))
+    .filter((j) => j.kind !== "page" && !isPassive(j) && !pendingWatched(j.episode_id))
     .filter((j) => STAGED_UNWATCHED.includes(j.state))
     .reduce((sum, j) => sum + (j.duration ?? 0), 0);
+}
+
+/** Rows the "⬇ all videos" sweep should fetch: episodes whose Stage-1 video may
+    be staged on the server and isn't already on the phone. Page jobs are
+    excluded the same way the list itself excludes them — a page has no video
+    artifact, so asking for one 404s and lands in the failure alert. */
+export function pendingVideoDownloads(jobs: Job[]): Job[] {
+  return jobs.filter(
+    (j) => j.kind !== "page" && HAS_VIDEO.includes(j.state) && !getVideoRecord(j.episode_id),
+  );
 }
 
 /** Seconds → hh:mm:ss for the unwatched-backlog readout. */
@@ -394,7 +406,7 @@ export function ratingBlock(
   return wrap;
 }
 
-function jobRow(
+export function jobRow(
   job: Job,
   rerender: () => void,
   onRatingTouch?: () => void,
@@ -550,6 +562,30 @@ function jobRow(
       const play = el("a", "small btn", pos != null && pos > 0 ? "▶ resume" : "▶ play") as HTMLAnchorElement;
       play.href = `#/player/${encodeURIComponent(ep)}`;
       actions.appendChild(play);
+      // A record can outlive a usable file: the PC re-staged the episode, or
+      // the download is there but won't play. Without this the row is stuck on
+      // ▶ play forever — the only other way out is swipe-delete, which also
+      // purges the server's artifacts. Re-pull in place instead.
+      if (!offline) {
+        const again = el("button", "small", "↻") as HTMLButtonElement;
+        again.title = "re-download video";
+        again.addEventListener("click", async () => {
+          again.disabled = true;
+          try {
+            await downloadVideo(ep, (frac, bytes) => {
+              again.textContent = frac != null
+                ? `↻ ${Math.round(frac * 100)}%`
+                : `↻ ${Math.round(bytes / 1e6)} MB`;
+            });
+            rerender();
+          } catch (e) {
+            again.textContent = "↻";
+            again.disabled = false;
+            alert(`re-download failed: ${(e as Error).message}`);
+          }
+        });
+        actions.appendChild(again);
+      }
     } else if (!offline) {
       const dl = el("button", "small", "⬇ video") as HTMLButtonElement;
       dl.addEventListener("click", async () => {
@@ -697,8 +733,9 @@ export function queueView(): HTMLElement {
     backlog.textContent = total > 0 ? hms(total) : "";
     const rerender = () => void load();
     const onRatingTouch = () => (lastRatingTouch = Date.now());
-    // sources queued while unreachable, waiting in the outbox
-    for (const source of pendingEnqueues()) {
+    // sources queued while unreachable, waiting in the outbox (5ch URLs show
+    // on the Pages tab instead)
+    for (const source of pendingEnqueues().filter((s) => !isPageSource(s))) {
       const row = el("div", "job");
       const main = el("div", "job-main");
       main.appendChild(el("div", "job-title", source));
@@ -708,8 +745,11 @@ export function queueView(): HTMLElement {
       row.appendChild(main);
       list.appendChild(row);
     }
-    // passive-shelved episodes live on the Listen tab, not here
-    for (const j of sortJobs(jobs.filter((j) => !isPassive(j)), sortSel.value as QueueSort))
+    // passive-shelved episodes live on the Listen tab, page jobs on Pages
+    for (const j of sortJobs(
+      jobs.filter((j) => j.kind !== "page" && !isPassive(j)),
+      sortSel.value as QueueSort,
+    ))
       list.appendChild(
         swipeable(jobRow(j, rerender, onRatingTouch, offline), () =>
           void removeJob(j, rerender, offline),
@@ -743,7 +783,7 @@ export function queueView(): HTMLElement {
   async function cacheStagedPreps(): Promise<boolean> {
     let fetched = false;
     for (const j of jobs) {
-      if (!STAGED_UNWATCHED.includes(j.state)) continue;
+      if (j.kind === "page" || !STAGED_UNWATCHED.includes(j.state)) continue;
       const cached = getCachedPrep(j.episode_id);
       if (!cached?.curate) {
         try {
@@ -828,9 +868,7 @@ export function queueView(): HTMLElement {
   refresh.addEventListener("click", () => void load());
   const dlAll = el("button", "small", "⬇ all videos") as HTMLButtonElement;
   dlAll.addEventListener("click", async () => {
-    const pending = jobs.filter(
-      (j) => HAS_VIDEO.includes(j.state) && !getVideoRecord(j.episode_id),
-    );
+    const pending = pendingVideoDownloads(jobs);
     if (!pending.length) {
       dlAll.textContent = "nothing to download";
       setTimeout(() => (dlAll.textContent = "⬇ all videos"), 1500);

@@ -4,6 +4,7 @@
 // close-out happens locally now, the server catches up at the next sync.
 
 import { api, ApiError } from "../api";
+import { applyKnown, fetchPaint, getCachedPaint, knownFor } from "../paint";
 import { renderPrep } from "../prep-render";
 import {
   cachePrep,
@@ -34,8 +35,11 @@ export function prepView(episodeId: string): HTMLElement {
   const status = el("div", "status");
   root.appendChild(status);
 
+  let current: PrepDoc | null = null;
+
   async function load(): Promise<void> {
     const cached: PrepDoc | null = getCachedPrep(episodeId);
+    const cachedRaw = cached ? JSON.stringify(cached) : null; // before show() overlays paint
     if (cached) {
       status.textContent = "";
       show(cached);
@@ -47,14 +51,22 @@ export function prepView(episodeId: string): HTMLElement {
       // re-render even over a cached doc: server-side curation/fixes should
       // show up on reopen, not only after a cache clear (taps live in the
       // store, so a rebuild loses nothing)
-      if (JSON.stringify(fresh) !== JSON.stringify(cached)) show(fresh);
+      if (JSON.stringify(fresh) !== cachedRaw) show(fresh);
     } catch (e) {
       if (!cached)
         status.textContent = `⚠ not cached and server unreachable — ${(e as Error).message}`;
     }
+    // live paint state (paint.ts): words the ledger now calls known lose
+    // their unknown wash — the doc's token flags froze at coverage time
+    const st = await fetchPaint(episodeId);
+    if (st && current && root.isConnected &&
+        applyKnown(Object.values(current.sentences_by_idx), knownFor(st)))
+      show(current);
   }
 
   function show(doc: PrepDoc): void {
+    current = doc;
+    applyKnown(Object.values(doc.sentences_by_idx), knownFor(getCachedPaint(episodeId)));
     root.querySelector(".prep")?.remove();
     root.querySelector(".submit-bar")?.remove();
 

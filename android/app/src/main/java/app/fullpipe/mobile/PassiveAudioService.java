@@ -70,8 +70,11 @@ public class PassiveAudioService extends Service {
         final String title;
         final String episodeId;
         /** Resume hint from JS (the video player's saved position) — the
-            service's own persisted position wins over it. */
-        final long startMs;
+            service's own persisted position wins over it. One-shot: consumed
+            the first time this track starts, so a later clear (finished a
+            track, looped round again) means the top and not this stale
+            watch position. */
+        long startMs;
 
         Track(String path, String title, String episodeId, long startMs) {
             this.path = path;
@@ -86,12 +89,16 @@ public class PassiveAudioService extends Service {
         final int startIndex;
         final float speed;
         final int startPositionMs;
+        /** How ListenLog files this playback's time: "listen" (passive
+            queue) or "watch" (the player's audio-only mode). */
+        final String kind;
 
-        Load(List<Track> tracks, int startIndex, float speed, int startPositionMs) {
+        Load(List<Track> tracks, int startIndex, float speed, int startPositionMs, String kind) {
             this.tracks = tracks;
             this.startIndex = startIndex;
             this.speed = speed;
             this.startPositionMs = startPositionMs;
+            this.kind = kind;
         }
     }
 
@@ -123,6 +130,11 @@ public class PassiveAudioService extends Service {
     private boolean resumeOnFocusGain = false;
     private SharedPreferences positions;
     private long lastPersistAt = 0;
+    /** Listening-time log (ListenLog): accrues while playing, closes with
+        the track. lastTickAt anchors the wall-clock delta between ticks. */
+    private ListenLog listenLog;
+    private long lastTickAt = 0;
+    private String logKind = "listen";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -134,6 +146,10 @@ public class PassiveAudioService extends Service {
         public void run() {
             if (!playing) return;
             long now = SystemClock.elapsedRealtime();
+            // the player has been playing since the last tick — that whole
+            // stretch is listening time, however late the handler ran
+            listenLog.tick(now - lastTickAt, currentPosition(), duration());
+            lastTickAt = now;
             if (now - lastPersistAt >= PERSIST_EVERY_MS) {
                 lastPersistAt = now;
                 persistPosition();
@@ -207,6 +223,7 @@ public class PassiveAudioService extends Service {
         instance = this;
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         positions = getSharedPreferences(POSITIONS_PREFS, MODE_PRIVATE);
+        listenLog = new ListenLog(this);
 
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel(
@@ -273,8 +290,15 @@ public class PassiveAudioService extends Service {
                 tracks.clear();
                 tracks.addAll(load.tracks);
                 speed = load.speed;
-                startAt(Math.max(0, Math.min(load.startIndex, tracks.size() - 1)),
-                        load.startPositionMs);
+                logKind = load.kind;
+                int start = Math.max(0, Math.min(load.startIndex, tracks.size() - 1));
+                // the video-position hint belongs to the episode you actually
+                // asked for; the rest of the queue starts where the service's
+                // own persisted position says, or at the top
+                for (int t = 0; t < tracks.size(); t++) {
+                    if (t != start) tracks.get(t).startMs = 0;
+                }
+                startAt(start, load.startPositionMs);
             }
         } else if (ACTION_TOGGLE.equals(action)) {
             toggle();
@@ -325,6 +349,7 @@ public class PassiveAudioService extends Service {
         player.setOnPreparedListener(mp -> {
             prepared = true;
             long target = seekMs > 0 ? seekMs : seekMs == 0 ? resumeMs(track) : 0;
+            track.startMs = 0; // hint spent — from here the persisted position rules
             long dur = duration();
             if (target > RESUME_MIN_MS && (dur <= 0 || target < dur - RESUME_TAIL_MS)) {
                 mp.seekTo((int) target);
@@ -333,6 +358,7 @@ public class PassiveAudioService extends Service {
             requestFocus();
             mp.start();
             playing = true;
+            listenLog.start(track.episodeId, track.title, currentPosition(), dur, logKind);
             startTicks();
             publish();
         });
@@ -378,6 +404,7 @@ public class PassiveAudioService extends Service {
 
     private void startTicks() {
         handler.removeCallbacks(progressTick);
+        lastTickAt = SystemClock.elapsedRealtime();
         handler.postDelayed(progressTick, 1000);
     }
 
@@ -391,6 +418,9 @@ public class PassiveAudioService extends Service {
             player.pause();
             playing = false;
             handler.removeCallbacks(progressTick);
+            // credit the stretch since the last tick, then the clock stops;
+            // the sitting stays open — a pause is part of listening, not its end
+            listenLog.tick(SystemClock.elapsedRealtime() - lastTickAt, currentPosition(), duration());
             persistPosition();
             publish();
         }
@@ -461,6 +491,10 @@ public class PassiveAudioService extends Service {
 
     private void releasePlayer() {
         handler.removeCallbacks(progressTick);
+        if (playing) {
+            listenLog.tick(SystemClock.elapsedRealtime() - lastTickAt, currentPosition(), duration());
+        }
+        listenLog.close(); // leaving the track (next / stop / death) ends the sitting
         if (player != null) {
             try {
                 player.release();
@@ -509,6 +543,11 @@ public class PassiveAudioService extends Service {
 
     long getDurationMs() {
         return duration();
+    }
+
+    /** The listening sitting in progress (ListenLog), for a live readout. */
+    org.json.JSONObject openListenSegment() {
+        return listenLog.current();
     }
 
     String currentEpisodeId() {

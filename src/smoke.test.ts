@@ -25,7 +25,8 @@ import {
 } from "./store";
 import { flushOutbox } from "./sync";
 import { api, ApiError } from "./api";
-import { backlogSeconds, hms, sortJobs, starBar } from "./views/queue";
+import { backlogSeconds, hms, jobRow, pendingVideoDownloads, sortJobs, starBar }
+  from "./views/queue";
 import { statsView } from "./views/stats";
 import { confirmView } from "./views/confirm";
 import { cacheStats } from "./store";
@@ -347,11 +348,14 @@ describe("statsView", () => {
     vi.spyOn(api, "getStats").mockResolvedValue(stats);
     const root = statsView();
     document.body.appendChild(root);
-    await vi.waitFor(() => expect(root.querySelectorAll(".stat-tile").length).toBe(4));
+    await vi.waitFor(() => expect(root.querySelectorAll(".ledger .stat-tile").length).toBe(4));
+    // the immersion-time section sits above the ledger tiles, own tiles + empty state
+    expect(root.querySelectorAll(".viewtime .stat-tile").length).toBe(4);
+    expect(root.querySelector(".viewtime")!.textContent).toContain("Nothing recorded yet");
     // top-1000 tile shows 95% (948/1000)
     expect(root.textContent).toContain("95%");
     // one coverage bar per frequency band, filled to the pct
-    const fills = root.querySelectorAll<HTMLElement>(".freqfill");
+    const fills = root.querySelectorAll<HTMLElement>(".ledger .freqfill"); // the goal card has one too
     expect(fills.length).toBe(2);
     expect(fills[0].style.width).toBe("95%");
     // confirm-words banner links to the confirm queue
@@ -369,7 +373,7 @@ describe("statsView", () => {
     const root = statsView();
     document.body.appendChild(root);
     // cached numbers paint immediately even though the fetch fails
-    expect(root.querySelectorAll(".stat-tile").length).toBe(4);
+    expect(root.querySelectorAll(".ledger .stat-tile").length).toBe(4);
     await vi.waitFor(() =>
       expect(root.querySelector(".status")!.textContent).toMatch(/offline/));
     root.remove();
@@ -488,6 +492,60 @@ describe("backlogSeconds", () => {
   it("excludes an episode marked watched offline, while the state is stale", () => {
     queueWatched("b", false);
     expect(backlogSeconds([job("a", {}), job("b", {})])).toBe(600);
+  });
+});
+
+describe("pendingVideoDownloads", () => {
+  const job = (episode_id: string, extra: Partial<Job>): Job =>
+    ({ episode_id, source: "s", state: "staged", ...extra }) as Job;
+  const ids = (jobs: Job[]) => pendingVideoDownloads(jobs).map((j) => j.episode_id);
+
+  it("takes staged episodes that aren't on the phone yet", () => {
+    expect(
+      ids([
+        job("a", {}),
+        job("b", { state: "reconciled" }),
+        job("c", { state: "queued" }), // stage 1 hasn't staged a video
+        job("d", { state: "watched" }),
+      ]),
+    ).toEqual(["a", "b"]);
+  });
+
+  it("skips an episode already downloaded", () => {
+    localStorage.setItem("fp.video.a", JSON.stringify({ path: "a.mp4" }));
+    expect(ids([job("a", {}), job("b", {})])).toEqual(["b"]);
+  });
+
+  it("skips page jobs — they have no video and the fetch 404s", () => {
+    expect(ids([job("a", {}), job("page_5ch_newsplus_1", { kind: "page" })])).toEqual(["a"]);
+  });
+});
+
+describe("jobRow video actions", () => {
+  const job = (extra: Partial<Job>): Job =>
+    ({ episode_id: "ep1", source: "s", state: "staged", ...extra }) as Job;
+  const labels = (row: HTMLElement) =>
+    [...row.querySelectorAll("a,button")].map((n) => n.textContent);
+
+  it("offers a re-download beside play once the video is on the phone", () => {
+    localStorage.setItem("fp.video.ep1", JSON.stringify({ path: "videos/ep1.mp4" }));
+    const row = jobRow(job({}), () => {});
+    expect(labels(row)).toContain("▶ play");
+    // the escape hatch for a record that outlived a usable file
+    expect(labels(row)).toContain("↻");
+  });
+
+  it("offers only a download when the phone has no copy", () => {
+    const row = jobRow(job({}), () => {});
+    expect(labels(row)).toContain("⬇ video");
+    expect(labels(row)).not.toContain("↻");
+  });
+
+  it("hides the re-download when offline", () => {
+    localStorage.setItem("fp.video.ep1", JSON.stringify({ path: "videos/ep1.mp4" }));
+    const row = jobRow(job({}), () => {}, undefined, true);
+    expect(labels(row)).toContain("▶ play");
+    expect(labels(row)).not.toContain("↻");
   });
 });
 

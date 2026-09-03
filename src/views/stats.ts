@@ -4,8 +4,19 @@
 // closed; the last snapshot is cached for an offline glance.
 
 import { api, ApiError } from "../api";
-import { cacheStats, getCachedStats } from "../store";
-import type { Stats } from "../types";
+import {
+  cacheStats,
+  deleteViewSegment,
+  getCachedStats,
+  getViewLog,
+  mergeViewSegments,
+  recordViewSegment,
+  requeueViewSegments,
+} from "../store";
+import { flushOutbox } from "../sync";
+import { importListenLog } from "../viewtime";
+import { renderViewtime } from "./viewtime";
+import type { Stats, ViewSegment } from "../types";
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
   const n = document.createElement(tag);
@@ -28,9 +39,10 @@ function pct(known: number, total: number): number {
   return total > 0 ? Math.round((known / total) * 100) : 0;
 }
 
-function renderStats(root: HTMLElement, s: Stats): void {
+function renderStats(bannerBox: HTMLElement, root: HTMLElement, s: Stats): void {
   // confirm banner: items (words + phrases + grammar) awaiting a "do you
-  // know this?" — the count is the all-kinds total from the server
+  // know this?" — the count is the all-kinds total from the server. It
+  // paints into its own slot above the time log so it stays first.
   if (s.confirm_candidates > 0) {
     const n = s.confirm_candidates;
     const banner = el("a", "confirm-banner") as HTMLAnchorElement;
@@ -38,7 +50,7 @@ function renderStats(root: HTMLElement, s: Stats): void {
     banner.appendChild(el("span", "cb-text",
       `🧠 ${n} item${n > 1 ? "s" : ""} to confirm you know`));
     banner.appendChild(el("span", "cb-go", "Review →"));
-    root.appendChild(banner);
+    bannerBox.appendChild(banner);
   }
 
   // headline tiles
@@ -135,12 +147,54 @@ export function statsView(): HTMLElement {
   root.appendChild(el("h1", "", "Progress"));
   const status = el("div", "status", "loading…");
   root.appendChild(status);
-  const body = el("div");
+  const bannerBox = el("div");
+  root.appendChild(bannerBox);
+
+  // immersion time (viewtime.ts): phone-local, so it paints at once and
+  // works offline; the native listening log and the server's copy of the
+  // history fold in as they arrive
+  const timeBox = el("div", "viewtime");
+  root.appendChild(timeBox);
+  let listening: ViewSegment | null = null; // the service's sitting in progress
+  const paintTime = () => {
+    timeBox.textContent = "";
+    renderViewtime(timeBox, listening ? [...getViewLog(), listening] : getViewLog(), undefined, {
+      // hand-typed entries: into the log + outbox like a recorded sitting
+      onAdd: (seg) => {
+        recordViewSegment(seg);
+        void flushOutbox();
+        paintTime();
+      },
+      onDelete: (id) => {
+        deleteViewSegment(id);
+        void flushOutbox();
+        paintTime();
+      },
+      onGoalChanged: paintTime,
+    });
+  };
+  paintTime();
+  void importListenLog().then(({ added, open }) => {
+    listening = open;
+    if ((added || open) && root.isConnected) paintTime();
+  });
+  void api
+    .getViewtime()
+    .then(({ sessions }) => {
+      if (mergeViewSegments(sessions ?? []) && root.isConnected) paintTime();
+      // and the other direction: anything the phone has that the server
+      // doesn't goes back into the outbox (a dropped POST self-heals here)
+      if (requeueViewSegments(new Set((sessions ?? []).map((s) => s.id)))) void flushOutbox();
+    })
+    .catch(() => {});
+
+  const body = el("div", "ledger");
   root.appendChild(body);
 
   const paint = (s: Stats) => {
+    bannerBox.textContent = "";
     body.textContent = "";
-    renderStats(body, s);
+    renderStats(bannerBox, body, s);
   };
 
   // paint the cached snapshot instantly (if any), then refresh from the server

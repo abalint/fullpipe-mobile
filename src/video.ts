@@ -17,8 +17,10 @@ import type { Definitions, TranscriptDoc } from "./types";
     materially richer sidecars so refreshSidecars re-pulls episodes that are
     already `curated` (they'd otherwise cache the old shape forever).
     2: /definitions serves every lemma (any-word popup) + repair-gate names.
-    3: /definitions adds compound keys (帝王切開, そういう — compounds.ts). */
-export const SIDECAR_FORMAT = 3;
+    3: /definitions adds compound keys (帝王切開, そういう — compounds.ts).
+    4: /transcript carries `confirm`, the think-you-know queue for this
+       episode (lists.ts) — without a re-pull an old sidecar never goes blue. */
+export const SIDECAR_FORMAT = 4;
 
 export interface VideoRecord {
   path: string;
@@ -267,7 +269,7 @@ export async function deleteVideo(ep: string): Promise<void> {
   clearPosition(ep);
 }
 
-async function readLocalJson<T>(path: string | undefined): Promise<T | null> {
+export async function readLocalJson<T>(path: string | undefined): Promise<T | null> {
   if (!path) return null;
   try {
     const { data } = await Filesystem.readFile({

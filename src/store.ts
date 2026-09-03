@@ -9,7 +9,16 @@
 // replay-safe server-side (batch_id / review_id dedup, idempotent
 // watched/enqueue), so a double-flush after a flaky connection is harmless.
 
-import type { FollowState, Job, OutboxAction, PrepDoc, Stats, TapBatch, TapMark } from "./types";
+import type {
+  FollowState,
+  Job,
+  OutboxAction,
+  PrepDoc,
+  Stats,
+  TapBatch,
+  TapMark,
+  ViewSegment,
+} from "./types";
 
 export interface Settings {
   serverUrl: string;
@@ -25,6 +34,10 @@ const K = {
   prepIndex: "fp.prepIndex",
   jobs: "fp.jobsCache",
   stats: "fp.statsCache",
+  viewlog: "fp.viewlog",
+  viewopen: "fp.viewlog.open",
+  viewdeleted: "fp.viewlog.deleted",
+  viewgoal: "fp.viewgoal",
 };
 
 function read<T>(key: string, fallback: T): T {
@@ -97,7 +110,7 @@ export function pendingTapCount(episodeId: string): number {
 
 // ---- outbox --------------------------------------------------------------------
 
-function newId(): string {
+export function newId(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(8)))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
@@ -121,7 +134,11 @@ function pushAction(action: OutboxAction): void {
 
 /** The episode an action belongs to ("" for enqueues — no episode yet). */
 export function actionEpisode(a: OutboxAction): string {
-  return a.kind === "taps" ? a.batch.episode_id : a.kind === "enqueue" ? "" : a.episode_id;
+  if (a.kind === "taps") return a.batch.episode_id;
+  if (a.kind === "enqueue") return "";
+  if (a.kind === "viewtime") return a.segment.episode_id;
+  if (a.kind === "viewtime_delete") return "";
+  return a.episode_id;
 }
 
 /** Freeze the episode's current taps into the outbox. An empty batch is
@@ -202,11 +219,13 @@ export function removeFromOutbox(actionId: string): void {
   );
 }
 
-/** Drop an episode's pending actions — a deleted episode must not flush. */
+/** Drop an episode's pending actions — a deleted episode must not flush.
+    Time entries stay: the minutes were spent whether or not the row
+    survives, and the server keeps them without the episode. */
 export function removeEpisodeActions(episodeId: string): void {
   write(
     K.outbox,
-    getOutbox().filter((a) => actionEpisode(a) !== episodeId),
+    getOutbox().filter((a) => a.kind === "viewtime" || actionEpisode(a) !== episodeId),
   );
 }
 
@@ -239,8 +258,10 @@ export function pendingEnqueues(): string[] {
   return getOutbox().flatMap((a) => (a.kind === "enqueue" ? [a.source] : []));
 }
 
+/** Unsynced workflow actions for the row's "⇪ pending sync" chip. Time
+    entries don't count — they're bookkeeping, not a step the row is waiting on. */
 export function hasPendingActions(episodeId: string): boolean {
-  return getOutbox().some((a) => actionEpisode(a) === episodeId);
+  return getOutbox().some((a) => a.kind !== "viewtime" && actionEpisode(a) === episodeId);
 }
 
 /** Human summary for Settings: "2 tap batches · 1 watched · 1 rating". */
@@ -253,6 +274,8 @@ export function outboxSummary(): string {
     rating: ["rating", "ratings"],
     enqueue: ["enqueue", "enqueues"],
     passive: ["shelve", "shelves"],
+    viewtime: ["time entry", "time entries"],
+    viewtime_delete: ["time removal", "time removals"],
   };
   return [...counts]
     .map(([k, n]) => `${n} ${label[k][n > 1 ? 1 : 0]}`)
@@ -277,6 +300,107 @@ export function cacheStats(stats: Stats): void {
 
 export function getCachedStats(): { at: string; stats: Stats } | null {
   return read<{ at: string; stats: Stats } | null>(K.stats, null);
+}
+
+// ---- immersion-time log (Progress tab; MOBILE.md — viewing time) ---------------
+// Closed playback segments, phone-local for instant display; each one also
+// rides the outbox to POST /viewtime so the ledger keeps the history. The
+// "open" slot is the in-progress segment's checkpoint — a process kill mid-
+// playback loses at most a few seconds (viewtime.ts recovers it on start).
+
+export function getViewLog(): ViewSegment[] {
+  return read<ViewSegment[]>(K.viewlog, []);
+}
+
+/** Append one closed segment (no-op on a repeated id) and queue it for the
+    server. Returns whether it was new. */
+export function recordViewSegment(seg: ViewSegment): boolean {
+  const log = getViewLog();
+  if (log.some((s) => s.id === seg.id)) return false;
+  write(K.viewlog, [...log, seg]);
+  pushAction({ id: newId(), kind: "viewtime", segment: seg });
+  return true;
+}
+
+/** Fold in segments the server already holds (GET /viewtime — reinstall
+    backfill, the PC's spreadsheet import). No outbox: they came *from* the
+    server. Entries deleted here but not yet deleted there stay gone.
+    Returns how many were new. */
+export function mergeViewSegments(segs: ViewSegment[]): number {
+  const log = getViewLog();
+  const have = new Set(log.map((s) => s.id));
+  const gone = new Set(deletedViewIds());
+  const add = segs.filter((s) => !have.has(s.id) && !gone.has(s.id));
+  if (add.length) write(K.viewlog, [...log, ...add]);
+  return add.length;
+}
+
+/** Ids of hand-typed entries removed on this phone — tombstones, so a
+    server copy that hasn't caught up yet doesn't resurrect them. */
+export function deletedViewIds(): string[] {
+  return read<string[]>(K.viewdeleted, []);
+}
+
+/** Remove a sitting (the Progress tab's ✕ on a manual entry): drop it from
+    the log, withdraw any unsent add for it, tombstone the id, and queue the
+    server delete (idempotent there). Returns whether it existed. */
+export function deleteViewSegment(id: string): boolean {
+  const log = getViewLog();
+  if (!log.some((s) => s.id === id)) return false;
+  write(K.viewlog, log.filter((s) => s.id !== id));
+  write(K.viewdeleted, [...new Set([...deletedViewIds(), id])]);
+  write(
+    K.outbox,
+    getOutbox().filter((a) => !(a.kind === "viewtime" && a.segment.id === id)),
+  );
+  pushAction({ id: newId(), kind: "viewtime_delete", segment_id: id });
+  return true;
+}
+
+/** Re-queue local segments the server turned out not to hold (GET /viewtime
+    listed `serverIds`) and that aren't already waiting in the outbox — a
+    sitting whose POST was dropped as a permanent rejection (e.g. a 404 from
+    a server predating the route) gets a second chance rather than staying
+    phone-only forever. Returns how many were re-queued. */
+export function requeueViewSegments(serverIds: ReadonlySet<string>): number {
+  const pending = new Set(
+    getOutbox().flatMap((a) => (a.kind === "viewtime" ? [a.segment.id] : [])),
+  );
+  let n = 0;
+  for (const seg of getViewLog()) {
+    if (serverIds.has(seg.id) || pending.has(seg.id)) continue;
+    pushAction({ id: newId(), kind: "viewtime", segment: seg });
+    n++;
+  }
+  return n;
+}
+
+/** Weekly immersion goal (Progress tab). Hours of ACTIVE watching per
+    Sunday→Saturday week — passive listening never counts. Sticks until
+    changed. */
+export interface ViewGoal {
+  hours: number;
+}
+
+export const DEFAULT_VIEW_GOAL: ViewGoal = { hours: 40 };
+
+export function getViewGoal(): ViewGoal {
+  const g = read<Partial<ViewGoal>>(K.viewgoal, {});
+  const hours = Number(g.hours);
+  return { hours: Number.isFinite(hours) && hours > 0 ? hours : DEFAULT_VIEW_GOAL.hours };
+}
+
+export function saveViewGoal(goal: ViewGoal): void {
+  write(K.viewgoal, goal);
+}
+
+export function getOpenViewSegment(): ViewSegment | null {
+  return read<ViewSegment | null>(K.viewopen, null);
+}
+
+export function setOpenViewSegment(seg: ViewSegment | null): void {
+  if (seg) write(K.viewopen, seg);
+  else localStorage.removeItem(K.viewopen);
 }
 
 // ---- prep-doc cache -------------------------------------------------------------

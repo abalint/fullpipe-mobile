@@ -289,8 +289,13 @@ describe("tokenHighlight", () => {
     k: false,
     ...over,
   });
-  const at = (tier: SubTier, tok: ReturnType<typeof t>, target: string | null = null, cls?: string) =>
-    tokenHighlight(tok, tier, kw, hv, target, cls);
+  const at = (
+    tier: SubTier,
+    tok: ReturnType<typeof t>,
+    target: string | null = null,
+    cls?: string,
+    confirm?: ReadonlySet<string>,
+  ) => tokenHighlight(tok, tier, kw, hv, target, cls, confirm);
 
   it("off tier and non-content tokens get nothing", () => {
     expect(at("off", t({ l: "公園" }))).toBeNull();
@@ -313,6 +318,18 @@ describe("tokenHighlight", () => {
     expect(at("learn", t({ l: "新語" }))).toBe("hl-unk");
     expect(at("learn", t({ l: "復習" }), "復習", "reinforcement")).toBe("hl-lrn");
     expect(at("learn", t({ l: "既知", k: true, f: 500 }))).toBeNull(); // known stays silent
+  });
+
+  it("the think-you-know queue paints at every tier but off", () => {
+    const q = new Set(["既知", "候補"]);
+    expect(at("off", t({ l: "既知", k: true }), null, undefined, q)).toBeNull();
+    expect(at("focus", t({ l: "既知", k: true, f: 500 }), null, undefined, q)).toBe("hl-know");
+    expect(at("learn", t({ l: "既知", k: true }), null, undefined, q)).toBe("hl-know");
+    // and it outranks the episode-local hues, but never the curated keyword
+    // or the i+1 target
+    expect(at("focus", t({ l: "候補" }), null, undefined, q)).toBe("hl-know");
+    expect(at("focus", t({ l: "公園" }), null, undefined, q)).toBe("kw");
+    expect(at("focus", t({ l: "候補" }), "候補", "i_plus_1", q)).toBe("hl-target");
   });
 
   it("all: + corpus-tracked known words", () => {
@@ -366,13 +383,15 @@ describe("playerView subtitle overlay", () => {
     犬: [{ k: ["犬"], r: ["いぬ"], s: [{ pos: ["noun"], g: ["dog"] }] }],
   };
 
-  async function mount(): Promise<{ root: HTMLElement; video: HTMLVideoElement }> {
+  async function mount(
+    transcript: unknown = TRANSCRIPT,
+  ): Promise<{ root: HTMLElement; video: HTMLVideoElement }> {
     saveSettings({ serverUrl: "http://pc.ts.net:8321", token: "tok" });
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         if (String(url).includes("/transcript/"))
-          return new Response(JSON.stringify(TRANSCRIPT), { status: 200 });
+          return new Response(JSON.stringify(transcript), { status: 200 });
         if (String(url).includes("/definitions/"))
           return new Response(JSON.stringify(DEFS), { status: 200 });
         return new Response("nope", { status: 404 });
@@ -405,6 +424,17 @@ describe("playerView subtitle overlay", () => {
     expect(w.classList.contains("tap-k")).toBe(true);
     mark.click();
     expect(getTaps(EP)["犬"]).toBe("h");
+    root.remove();
+  });
+
+  it("paints the transcript's think-you-know words blue in the overlay", async () => {
+    // the ledger thinks 犬 is known and wants it confirmed — the hue says so
+    // even though the line is otherwise unremarkable at the default tier
+    const { root, video } = await mount({ ...TRANSCRIPT, confirm: ["犬"] });
+    video.dispatchEvent(new Event("timeupdate")); // first cue — carries 犬
+    const w = root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma]")!;
+    expect(w.dataset.lemma).toBe("犬");
+    expect(w.classList.contains("hl-know")).toBe(true);
     root.remove();
   });
 

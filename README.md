@@ -20,6 +20,8 @@ src/
 ├── api.ts             client for the MOBILE.md server API
 ├── store.ts           settings · per-episode taps · outbox · prep-doc + stats cache (localStorage)
 ├── sync.ts            opportunistic outbox flush (start / online / visible)
+├── viewtime.ts        immersion-time recorder (watch vs listen) + week/day grouping
+├── paint.ts           live highlight state (GET /paint) overlaid on cached sidecars
 ├── prep-render.ts     prep-doc renderer (port of render/template.html)
 ├── share.ts           JS side of the share-sheet target
 ├── views/             queue · prep · player · stats · settings
@@ -70,6 +72,53 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   top 1k/2k/5k/10k most common corpus words, how many are known), plus immersion
   and evidence-provenance counts. From `GET /stats` (ledger-sourced, so it reads
   with Anki closed); the last snapshot caches for an offline glance.
+- **Immersion time** (top of Progress, `viewtime.ts`): how long you actually
+  spent, **active watching (▶) and passive listening (🎧) counted apart**.
+  Today / this-week / all-time tiles, then every week as a collapsible
+  **Sunday→Saturday** block (the current week open, older ones folded, weeks
+  past the twelfth under "earlier"), days inside, one row per episode with
+  its minutes and whether it was **finished** or how far it got ("to 76%").
+  What counts is wall-clock time the media was advancing: a rewound stretch
+  counts again, a seek / pause / stall counts nothing, playback speed is
+  folded out (10 media-minutes at 1.25× = 8 of yours). The player feeds a
+  `ViewRecorder` from its timeupdate ticks; passive listening is logged by
+  the native service itself (`ListenLog.java` — the webview is dead with the
+  screen off) and drained into the same log on app start / foreground /
+  Progress open, with the sitting in progress shown live. Sittings are per
+  visit, split at midnight, checkpointed every ~5 s so a process kill loses
+  almost nothing, and dropped under one second. Only the **Listen tab's
+  queue** is passive: the player's 🎧 audio-only mode hands playback to the
+  same service but tagged `watch`, so following an episode with the screen
+  off still counts as watching. Phone-local (paints instantly, works offline); each closed
+  sitting also rides the outbox to `POST /viewtime` (idempotent on its id)
+  so the ledger keeps the history, and `GET /viewtime` backfills the local
+  log after a reinstall (and re-queues anything the server turned out not to
+  hold, so a dropped POST self-heals). A deleted episode keeps its minutes.
+  A **weekly goal card** (default 40 h, tap the goal to change it — the
+  number sticks on the phone until changed again) shows hours done and
+  left this Sunday→Saturday week and the even pace needed over the days
+  still open, today included. Active watching only — passive listening
+  never counts toward it.
+  **"＋ add time"** under the tiles logs immersion done outside the app
+  (day · minutes · listening/watching · what): a hand-typed sitting rides
+  the same log and outbox, shows with a ✎ and a ✕ (removing it tombstones
+  the id locally and issues `DELETE /viewtime/{id}`); recorded and imported
+  rows can't be removed from the phone. The pre-app spreadsheet's history
+  (`fullPipe/tools/import_tracker_pdf.py`, source `import`) arrives through
+  the same `GET /viewtime` merge — one row per show per day, so week bodies
+  are built lazily on open.
+- **Live paints** (`paint.ts`): the cached sidecars freeze each token's
+  known flag at the moment Stage-1 coverage ran and the think-you-know /
+  want-to-learn lists at the moment the transcript was pulled. Every
+  player / reader / prep open now overlays `GET /episodes/{id}/paint` — the
+  ledger's lists as of now, narrowed to that episode — cached per episode
+  for offline reopen, plus every word tapped ✓ anywhere on this phone (so a
+  mark in one show counts in the next before it has even synced). Known is
+  additive; confirm / interest replace the snapshot. Grammar points can't
+  be tokens, so the grammar half of the confirm queue is matched against the
+  curate pass's per-line patterns: a subtitle line carrying one gets a blue
+  `?` badge and the word popup paints the pattern blue with "think you know
+  this?".
 - **Confirm words** (`#/confirm`, reached from a banner on Progress): the human
   checkpoint that replaced silent exposure→known promotion. The ledger surfaces
   words you've met enough while watching (`GET /confirm`, with JMdict glosses +
@@ -109,8 +158,15 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   underline with a small `+1` line badge) / **learn** (+ every unknown word
   dimmed coral, reinforcement targets amber) / **all** (+ known
   corpus-tracked words in a faint blue audit tint). A word marked ✓ goes back
-  to plain white; ★ renders violet. Tier data rides `GET /transcript`
-  (per-sentence `cls`, per-token corpus rank `f`, ranked `candidates`); old
+  to plain white; ★ renders violet. Cutting across the tiers: words on the
+  ledger's **think-you-know** queue (exposures cleared the bar, awaiting a
+  yes/no on the Progress tab) paint light blue at every tier but off — that
+  is standing state about the user, not arithmetic about this episode, so it
+  outranks the candidate/unknown hues (a curated keyword and the i+1 target
+  still win). The page reader paints the same set as a light-blue wash,
+  under its `◨ hl` toggle. Tier data rides `GET /transcript`
+  (per-sentence `cls`, per-token corpus rank `f`, ranked `candidates`,
+  and the narrowed `confirm` list); old
   cached sidecars degrade gracefully (i+1 falls back to a sole-unknown check,
   high-value falls back to prep-glossary lemmas). The `Aa` panel also holds
   subtitle size (0.85–2×) and height (raise the line 0–40% off the bottom

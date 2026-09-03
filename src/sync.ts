@@ -36,6 +36,10 @@ function send(action: OutboxAction): Promise<unknown> {
       return api.enqueue(action.source);
     case "passive":
       return api.setPassive(action.episode_id, action.passive);
+    case "viewtime":
+      return api.postViewtime(action.segment);
+    case "viewtime_delete":
+      return api.deleteViewtime(action.segment_id);
   }
 }
 

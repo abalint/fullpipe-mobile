@@ -7,10 +7,13 @@ import type {
   FollowState,
   ItemKind,
   Job,
+  PageDoc,
+  PaintState,
   PrepDoc,
   Stats,
   TapBatch,
   TranscriptDoc,
+  ViewSegment,
 } from "./types";
 import { getSettings } from "./store";
 
@@ -143,6 +146,17 @@ export const api = {
       watched: boolean;
       cards?: { queued?: number; note?: string; pushed?: number; error?: string; deck?: string };
     }>(`/watched/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ cards }) }),
+  // immersion-time log (MOBILE.md — viewing time): one closed playback
+  // segment per POST, idempotent on the client-minted id; GET hands the
+  // whole history back so a reinstalled app can rebuild its local log
+  postViewtime: (segment: ViewSegment) =>
+    request<{ id: string; duplicate: boolean }>(
+      "/viewtime", { method: "POST", body: JSON.stringify(segment) }),
+  getViewtime: () => request<{ sessions: ViewSegment[] }>("/viewtime"),
+  // drop one sitting (a hand-typed entry removed on the phone); idempotent
+  deleteViewtime: (id: string) =>
+    request<{ id: string; deleted: boolean }>(`/viewtime/${encodeURIComponent(id)}`,
+      { method: "DELETE" }),
   // media/artifact URLs carry the token as ?t= too: Filesystem.downloadFile
   // can't always send headers (server media_auth accepts either;
   // tailnet-only traffic, so a query token is fine)
@@ -153,7 +167,13 @@ export const api = {
   // in-app player's subtitle overlay — /prep only ships the i+1 subset
   getTranscript: (id: string) =>
     request<TranscriptDoc>(`/transcript/${encodeURIComponent(id)}`),
+  // live highlight state for one episode (paint.ts): what's known / in the
+  // confirm queue / wanted NOW, narrowed to this episode's words + patterns
+  getPaint: (id: string) => request<PaintState>(`/episodes/${encodeURIComponent(id)}/paint`),
   definitionsUrl: (id: string) => `${base()}/definitions/${encodeURIComponent(id)}`,
+  // page-job post structure for the reader (tokens ride in /transcript)
+  pageUrl: (id: string) => `${base()}/page/${encodeURIComponent(id)}`,
+  getPage: (id: string) => request<PageDoc>(`/page/${encodeURIComponent(id)}`),
   // JMdict entries for every content lemma in the episode (any-word popup);
   // {} until the PC has run `tools.jmdict build`
   getDefinitions: (id: string) =>

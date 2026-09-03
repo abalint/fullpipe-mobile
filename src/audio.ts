@@ -8,14 +8,15 @@ import { registerPlugin } from "@capacitor/core";
 import type { PluginListenerHandle } from "@capacitor/core";
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import { getPosition, getVideoRecord } from "./video";
-import type { Job } from "./types";
+import type { Job, ViewKind, ViewSegment } from "./types";
 
 export interface PassiveTrack {
   src: string; // file:// URI of the downloaded mp4
   title: string;
   episodeId: string;
   startMs?: number; // resume hint (video player's saved position); the
-  // service's own persisted position wins over it
+  // service's own persisted position wins over it, and it only applies to the
+  // episode you actually started on, once — looping relistens start at the top
 }
 
 /** Mirror of the service's state broadcast — also the getState() shape.
@@ -37,6 +38,10 @@ interface PassiveAudioPlugin {
     startIndex?: number;
     speed?: number;
     startPositionMs?: number; // resume the track here (video-player handoff)
+    // how the service logs this playback's time (viewtime.ts): the Listen
+    // tab's queue is passive "listen" (default); the player's audio-only
+    // mode is still the episode being actively followed → "watch"
+    kind?: ViewKind;
   }): Promise<void>;
   toggle(): Promise<void>;
   next(): Promise<void>;
@@ -48,6 +53,11 @@ interface PassiveAudioPlugin {
   setSleepTimer(opts: { minutes: number }): Promise<void>; // 0 cancels
   setSavedPosition(opts: { episodeId: string; positionMs: number }): Promise<void>; // ≤0 clears
   getLastEpisode(): Promise<{ episodeId?: string }>; // queue memory; works with the service dead
+  // the service's own listening-time log (it runs with the webview dead, so
+  // it keeps the minutes itself): closed segments awaiting import, and the
+  // ack that clears them once viewtime.ts has stored them
+  getListenLog(): Promise<{ entries: ViewSegment[]; open?: ViewSegment }>;
+  clearListenLog(opts: { ids: string[] }): Promise<void>;
   getState(): Promise<PassiveAudioState>;
   addListener(
     eventName: "state",
