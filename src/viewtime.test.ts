@@ -307,9 +307,12 @@ describe("renderViewtime", () => {
     document.body.appendChild(root);
     const tiles = root.querySelectorAll(".stat-tile");
     expect(tiles.length).toBe(4);
-    expect(tiles[0].textContent).toContain("30m"); // today: 25m + 5m
-    expect(tiles[0].textContent).toContain("▶ 25m · 🎧 5m");
-    expect(tiles[1].textContent).toContain("45m"); // this week: 25 + 5 + 15
+    // big number = active watching only; passive sits small underneath, never summed
+    expect(tiles[0].querySelector(".num")!.textContent).toBe("25m"); // today: watch
+    expect(tiles[0].querySelector(".sub")!.textContent).toBe("🎧 5m passive");
+    expect(tiles[0].textContent).not.toContain("30m");
+    expect(tiles[1].querySelector(".num")!.textContent).toBe("40m"); // this week: 25 + 15
+    expect(tiles[1].querySelector(".sub")!.textContent).toBe("🎧 5m passive");
     expect(tiles[2].textContent).toContain("41m"); // watched all time: 25 + 15 + 1
     expect(tiles[3].textContent).toContain("5m"); // listened all time
 

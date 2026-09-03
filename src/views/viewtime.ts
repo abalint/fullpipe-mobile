@@ -45,6 +45,11 @@ export function splitLabel(watch: number, listen: number): string {
   return parts.length ? parts.join(" · ") : "0m";
 }
 
+/** The small line under the today / this-week tiles: passive time only. */
+export function passiveSub(listen: number): string {
+  return `${KIND_ICON.listen} ${fmtDur(listen)} passive`;
+}
+
 const MONTH_DAY = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
 const MONTH_DAY_YEAR = new Intl.DateTimeFormat(undefined, {
   month: "short", day: "numeric", year: "numeric",
@@ -301,11 +306,11 @@ export function renderViewtime(
     allListen += w.listen;
   }
   const grid = el("div", "stat-grid time");
+  // the big number is active watching only — that's the figure that matters;
+  // passive listening sits small underneath and is never summed into it
   grid.append(
-    tile(fmtDur((todayT?.watch ?? 0) + (todayT?.listen ?? 0)), "today",
-         splitLabel(todayT?.watch ?? 0, todayT?.listen ?? 0), "accent"),
-    tile(fmtDur((weekT?.watch ?? 0) + (weekT?.listen ?? 0)), "this week",
-         splitLabel(weekT?.watch ?? 0, weekT?.listen ?? 0), "accent"),
+    tile(fmtDur(todayT?.watch ?? 0), "today", passiveSub(todayT?.listen ?? 0), "accent"),
+    tile(fmtDur(weekT?.watch ?? 0), "this week", passiveSub(weekT?.listen ?? 0), "accent"),
     tile(fmtDur(allWatch), "watched, all time", "active — in the player", "know"),
     tile(fmtDur(allListen), "listened, all time", "passive — background audio", "know"),
   );
