@@ -21,6 +21,8 @@ src/
 ├── store.ts           settings · per-episode taps · outbox · prep-doc + stats cache (localStorage)
 ├── sync.ts            opportunistic outbox flush (start / online / visible)
 ├── viewtime.ts        immersion-time recorder (watch vs listen) + week/day grouping
+├── listfilter.ts      sort + status/genre/on-phone filters shared by the Queue and Listen tabs
+├── nowplaying.ts      now-playing strip above the nav → back to the episode the audio service is playing
 ├── paint.ts           live highlight state (GET /paint) overlaid on cached sidecars
 ├── prep-render.ts     prep-doc renderer (port of render/template.html)
 ├── share.ts           JS side of the share-sheet target
@@ -51,6 +53,14 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Behavior notes
 
+- **Series (box sets ingested on the PC — `fullPipe/skills/series`):** rows
+  carrying `series`/`ep_no` group under a collapsible header in playlist
+  order (`src/series.ts`), the header offers ▶/⬇ for the next unwatched
+  episode, and the player shows an *up next* card when an episode ends
+  (autoplays after 8 s if the next one is downloaded — Settings → Playback).
+  Swipe-delete on a series row is **phone-local**: only the video + sidecars
+  leave the phone; the PC keeps everything, ⬇ brings it back.
+
 - **Offline:** downloaded episodes are fully usable without the server. The
   `⬇` bundle is video + subs + transcript + definitions + the prep doc; prep
   docs are also cached on first view and auto-cached for every staged episode
@@ -66,6 +76,20 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   `⇪ pending sync` chip, and a queued mark-watched shows as watched. Taps
   accumulate per episode in localStorage; **Submit** freezes them into a batch.
   "Copy blob" keeps the P9 copy-paste fallback.
+- **Sort + filter** (Queue and Listen tabs, `listfilter.ts`): the sort select
+  (newest / oldest / easiest / hardest / longest / shortest / top rated /
+  title) plus a filter row — status (to watch · watched · in progress),
+  **genre** (the English label `/immerse` curation gave the episode:
+  documentary, vlog, explainer, comedy, interview …, offered only from what's
+  on screen), and an **⬇ on phone** toggle for downloaded episodes. Every row
+  shows its genre as a chip. Choices persist per tab. On the Listen tab the
+  visible order *is* the playlist order, so sorting there reorders what
+  "play all" loops through.
+- **Now-playing strip** (`nowplaying.ts`): while the background audio service
+  is playing — the Listen queue or the player's 🎧 mode — a one-line bar above
+  the nav names the episode on every other tab; tap it to open that video in
+  the player (which picks the running audio session back up), or ⏯ to pause
+  in place. It hides on the Listen tab and on that episode's own player.
 - **Progress tab** (`#/progress`): the payoff of the known-lemma ledger, made
   visible — headline tiles (words known, % of the 1,000 most common words,
   episodes watched, cards minted) over **frequency-band coverage bars** (of the

@@ -30,6 +30,19 @@ export interface Job {
   tags?: string[]; // taste chips on the latest review (RATING_TAGS slugs)
   axes?: Record<string, number>; // survey axes 1-5 (SURVEY.md): topic_pull, presenter, …
   follow?: FollowState | null; // per-channel intent, decoupled from the star
+  /** /immerse's curation labels off the ledger's episode row (English,
+      categorical: documentary · vlog · explainer · comedy · interview …).
+      null/absent until the episode has been curated. */
+  genre?: string | null;
+  format?: string | null; // production style (talking-head · live-action · podcast …)
+  channel?: string | null; // yt-dlp provenance
+  /** Box-set episodes ingested on the PC (tools.series — MOBILE.md "Series"):
+      the series slug, its display title, and this episode's playlist order.
+      Absent on everything else. Grouped + ordered by series.ts; swipe-delete
+      on these rows is phone-local (the PC keeps video + derived data). */
+  series?: string | null;
+  series_title?: string | null;
+  ep_no?: number | null;
   duration?: number | null; // runtime in seconds, once Stage 1 has artifacts
   comprehensibility?: number | null; // coverage's token_comprehensibility, 0..1
   error?: string | null;

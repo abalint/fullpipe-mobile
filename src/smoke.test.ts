@@ -25,8 +25,9 @@ import {
 } from "./store";
 import { flushOutbox } from "./sync";
 import { api, ApiError } from "./api";
-import { backlogSeconds, hms, jobRow, pendingVideoDownloads, sortJobs, starBar }
+import { backlogSeconds, hms, jobRow, pendingVideoDownloads, seriesBlock, sortJobs, starBar }
   from "./views/queue";
+import { groupSeries } from "./series";
 import { statsView } from "./views/stats";
 import { confirmView } from "./views/confirm";
 import { cacheStats } from "./store";
@@ -575,5 +576,40 @@ describe("sortJobs", () => {
     const before = ids(jobs);
     sortJobs(jobs, "shortest");
     expect(ids(jobs)).toEqual(before);
+  });
+});
+
+describe("seriesBlock (series.ts grouping on the queue)", () => {
+  const ep = (n: number, state: Job["state"] = "staged"): Job =>
+    ({
+      episode_id: `ser_hotspot_e0${n}`, source: `series://hotspot/${n}`, state,
+      title: `Hot Spot EP0${n}`, series: "hotspot", series_title: "Hot Spot", ep_no: n,
+    }) as Job;
+  it("orders episodes, counts progress, and offers the next unwatched one", () => {
+    localStorage.setItem("fp.video.ser_hotspot_e02", JSON.stringify({ path: "v", size: 1, at: "" }));
+    const g = groupSeries([ep(3), ep(1, "watched"), ep(2)]).series[0];
+    const block = seriesBlock(g, () => {}, undefined, false);
+    const head = block.querySelector(".series-head")!;
+    expect(head.querySelector(".series-title")!.textContent).toBe("Hot Spot");
+    expect(head.textContent).toContain("1/3 watched");
+    expect(head.textContent).toContain("1 on phone");
+    // EP02 is the next unwatched and is downloaded → a play link
+    const play = head.querySelector<HTMLAnchorElement>("a.btn")!;
+    expect(play.textContent).toBe("▶ EP02");
+    expect(play.getAttribute("href")).toBe("#/player/ser_hotspot_e02");
+    const chips = [...block.querySelectorAll(".series-body .chip.ep")].map((c) => c.textContent);
+    expect(chips).toEqual(["EP01", "EP02", "EP03"]);
+  });
+  it("offers a download when the next episode is not on the phone", () => {
+    const g = groupSeries([ep(1), ep(2)]).series[0];
+    const block = seriesBlock(g, () => {}, undefined, false);
+    expect(block.querySelector(".series-head button")!.textContent).toBe("⬇ EP01");
+  });
+  it("collapses and remembers it", () => {
+    const g = groupSeries([ep(1)]).series[0];
+    const block = seriesBlock(g, () => {});
+    (block.querySelector(".series-head") as HTMLElement).click();
+    expect(block.classList.contains("collapsed")).toBe(true);
+    expect(localStorage.getItem("fp.series.collapsed.hotspot")).toBe("1");
   });
 });

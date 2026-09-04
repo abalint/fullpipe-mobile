@@ -214,10 +214,38 @@ button.small.on { border-color: var(--accent); color: var(--accent); }
   background: color-mix(in srgb, var(--muted) 25%, transparent); }
 .watchbar-fill { height: 100%; background: var(--accent); }
 
-.toolbar select.sort {
+.toolbar select.sort, .filters select.sort {
   font: inherit; font-size: .8rem; padding: 5px 8px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--card); color: var(--fg);
+  min-width: 0;
 }
+/* filter row under the toolbar: status · genre · on-phone toggle · "n of N" */
+.filters { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; flex-wrap: wrap; }
+.filters .count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.filters button.toggle.on { border-color: var(--accent); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent); }
+/* /immerse's genre label on a row */
+.chip.genre { margin-left: 6px; background: color-mix(in srgb, var(--hl) 70%, transparent);
+  color: var(--fg); }
+
+/* Now-playing strip: sits above the bottom nav on every tab while the
+   background audio service is running, except where that episode is already
+   on screen (its player, the Listen tab). Tap the title → the video. */
+.nowplaying {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+  border-top: 1px solid var(--border); background: var(--card);
+  font-size: .85rem;
+}
+.nowplaying[hidden] { display: none; }
+.nowplaying .np-go {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--fg); text-decoration: none;
+}
+.nowplaying .np-go b { color: var(--accent); font-weight: 600; margin-right: 6px; }
+.nowplaying .np-go .np-title { font-weight: 500; }
+.nowplaying .np-go .np-pos { color: var(--muted); font-size: .78rem; margin-left: 6px;
+  font-variant-numeric: tabular-nums; }
+.nowplaying button.small { flex: none; }
 
 /* End-of-article action bar (in normal flow — nothing floats over the doc).
    Buttons in a row split the width evenly (flex-basis 0) so labels never
@@ -552,5 +580,29 @@ button.more { display: block; margin: 12px auto 24px; }
 /* the shared gloss card, pinned above the bottom nav on scrolling pages
    (the player anchors it inside its stage instead) */
 .gloss-pop.fixed { position: fixed; left: 50%; transform: translateX(-50%);
-                   bottom: calc(64px + env(safe-area-inset-bottom));
+                   bottom: calc(64px + var(--nowplaying-h, 0px) + env(safe-area-inset-bottom));
                    width: min(92%, 480px); max-height: 45vh; z-index: 40; }
+
+/* --- series (box sets — series.ts) --------------------------------------------
+   Grouped under a header in playlist order; the header carries the resume
+   action. Rows keep the normal job look plus an episode-number chip. */
+.series { margin: 14px 0 6px; }
+.series-head { display: flex; align-items: center; gap: 8px; padding: 6px 2px;
+               cursor: pointer; }
+.series-head .series-title { flex: 1; min-width: 0; font-weight: 600;
+                             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.series-head .muted { font-size: .8rem; }
+.series.collapsed .series-body { display: none; }
+.chip.ep { margin-right: 6px; background: color-mix(in srgb, var(--accent) 18%, transparent);
+           color: var(--accent); font-variant-numeric: tabular-nums; }
+.field.check { flex-direction: row; align-items: center; gap: 10px; }
+.field.check input { width: auto; }
+
+/* end-of-episode card in the player: up next + countdown (series only) */
+.upnext[hidden] { display: none; } /* display:flex below would beat the UA [hidden] rule */
+.upnext { position: absolute; inset: 0; display: flex; flex-direction: column;
+          align-items: center; justify-content: center; gap: 10px;
+          background: rgba(0, 0, 0, .78); color: #fff; text-align: center; padding: 16px; }
+.upnext .muted { color: #bbb; }
+.upnext .upnext-title { font-size: 1.05rem; font-weight: 600; }
+.upnext .btnrow { justify-content: center; flex-wrap: wrap; }

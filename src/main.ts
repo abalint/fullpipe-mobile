@@ -15,9 +15,18 @@ import { flushOutbox, installAutoFlush } from "./sync";
 import { importListenLog, recoverOpenSegment } from "./viewtime";
 import { installShareTarget } from "./share";
 import { isPageSource } from "./pages";
-import { cachedPrepIds, getSettings } from "./store";
+import { cachedPrepIds, getCachedJobs, getSettings } from "./store";
+import { nowPlayingStrip } from "./nowplaying";
 
 const outlet = document.getElementById("outlet")!;
+
+// now-playing strip above the nav: a way back to the episode the background
+// audio service is playing from any other tab
+document.querySelector("nav")!.before(
+  nowPlayingStrip(
+    (ep) => getCachedJobs()?.jobs.find((j) => j.episode_id === ep)?.title,
+  ),
+);
 
 function route(): void {
   const hash = location.hash || "#/queue";

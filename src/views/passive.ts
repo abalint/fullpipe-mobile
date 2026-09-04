@@ -10,7 +10,8 @@ import type { PassiveAudioState } from "../audio";
 import { cacheJobs, getCachedJobs } from "../store";
 import { clearPosition, downloadVideo, getVideoRecord, savePosition } from "../video";
 import { fmtClock } from "./player";
-import { fmtDur, isPassive, removeJob, sortJobs, swipeable } from "./queue";
+import { fmtDur, isPassive, removeJob, swipeable } from "./queue";
+import { filterJobs, listControls, sortJobs } from "../listfilter";
 import type { Job } from "../types";
 
 const SPEED_KEY = "fp.listen.speed";
@@ -42,7 +43,14 @@ export function passiveView(): HTMLElement {
   // resumes here (kept natively, so it survives app restarts)
   let lastEp: string | undefined;
 
-  const passiveJobs = () => sortJobs(jobs.filter(isPassive), "newest");
+  // sort + genre/on-phone filter (fp.listen.*). The visible order IS the
+  // playlist order — "play all" loops the list as shown, so sorting by genre
+  // or length here reorders what plays next.
+  const listCtl = listControls("fp.listen", () => render(), { status: false });
+  const passiveJobs = () => {
+    const { sort, filter } = listCtl.current();
+    return sortJobs(filterJobs(jobs.filter(isPassive), filter), sort);
+  };
 
   // --- now-playing bar -------------------------------------------------------
   const bar = el("div", "listenbar");
@@ -168,6 +176,7 @@ export function passiveView(): HTMLElement {
     sub.appendChild(el("span", "chip st-watched", "passive"));
     // still queued for a /debrief conversation — delete stays blocked
     if (job.debrief) sub.appendChild(el("span", "chip debrief", "🗣 debrief"));
+    if (job.genre) sub.appendChild(el("span", "chip genre", job.genre));
     if (job.duration) sub.appendChild(el("span", "muted", ` ${fmtDur(job.duration)}`));
     if (!getVideoRecord(job.episode_id))
       sub.appendChild(el("span", "muted", " · not downloaded"));
@@ -222,11 +231,15 @@ export function passiveView(): HTMLElement {
   }
 
   function render(): void {
+    const all = jobs.filter(isPassive);
     const rows = passiveJobs();
+    listCtl.update(all, rows.length);
     if (!offline)
       status.textContent = rows.length
         ? ""
-        : "nothing here yet — 🎧 a watched episode on the Queue tab";
+        : all.length
+          ? "nothing matches the filters"
+          : "nothing here yet — 🎧 a watched episode on the Queue tab";
     list.textContent = "";
     for (const j of rows)
       list.appendChild(swipeable(jobRow(j), () => void removeJob(j, () => void load(), offline)));
@@ -265,9 +278,9 @@ export function passiveView(): HTMLElement {
   );
   const refresh = el("button", "small refresh", "↻ refresh") as HTMLButtonElement;
   refresh.addEventListener("click", () => void load());
-  toolbar.append(playAll, refresh);
+  toolbar.append(playAll, refresh, listCtl.sort);
 
-  root.append(toolbar, bar, status, list);
+  root.append(toolbar, listCtl.filters, bar, status, list);
 
   // live state from the service → highlight + bar; self-detaches when the
   // router swaps this view out. While playing this ticks every second, so

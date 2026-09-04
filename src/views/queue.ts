@@ -25,6 +25,9 @@ import {
 } from "../store";
 import { flushOutbox } from "../sync";
 import { isPageSource } from "../pages";
+import { epLabel, groupSeries, isDone, isSeries, nextToWatch } from "../series";
+import type { SeriesGroup } from "../series";
+import { filterJobs, listControls, sortJobs } from "../listfilter";
 import {
   deleteVideo,
   downloadVideo,
@@ -38,6 +41,10 @@ import { FOLLOW_OPTIONS, SURVEY_AXES } from "../types";
 const STAGE1: JobState[] = ["downloading", "transcribing", "tokenizing"];
 // states where Stage 1 has (or may have) a staged video on the server
 const HAS_VIDEO: JobState[] = ["prepared", "staged", "reconciled"];
+// a row offers ⬇ in those states, and again once watched (the server keeps
+// video.mp4 after the close-out — MOBILE.md retention — so a rewatch is one
+// tap; "⬇ all videos" still sweeps only the unwatched set)
+const canDownload = (job: Job) => HAS_VIDEO.includes(job.state) || isDone(job);
 // curated and unwatched — what counts toward the backlog-hours readout
 const STAGED_UNWATCHED: JobState[] = ["staged", "reconciled"];
 // the server is actively working these — the list auto-refreshes while any exist
@@ -89,41 +96,10 @@ export function fmtDur(seconds: number): string {
   return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m` : `${m}m`;
 }
 
-export type QueueSort = "newest" | "oldest" | "comp-desc" | "comp-asc" | "longest" | "shortest";
-const SORT_KEY = "fp.queue.sort";
-const SORT_OPTIONS: [QueueSort, string][] = [
-  ["newest", "newest first"],
-  ["oldest", "oldest first"],
-  ["comp-desc", "easiest first"],
-  ["comp-asc", "hardest first"],
-  ["longest", "longest first"],
-  ["shortest", "shortest first"],
-];
-
-/** Sort for the queue list. Metric sorts put rows without the metric (no
-    coverage/duration staged yet) at the bottom; ties fall back to newest. */
-export function sortJobs(jobs: Job[], sort: QueueSort): Job[] {
-  const created = (j: Job) => j.created_at ?? "";
-  const newest = (a: Job, b: Job) => created(b).localeCompare(created(a));
-  const metric =
-    (get: (j: Job) => number | null | undefined, desc: boolean) => (a: Job, b: Job) => {
-      const va = get(a);
-      const vb = get(b);
-      if (va == null && vb == null) return newest(a, b);
-      if (va == null) return 1;
-      if (vb == null) return -1;
-      return (desc ? vb - va : va - vb) || newest(a, b);
-    };
-  const cmp = {
-    newest,
-    oldest: (a: Job, b: Job) => -newest(a, b),
-    "comp-desc": metric((j) => j.comprehensibility, true),
-    "comp-asc": metric((j) => j.comprehensibility, false),
-    longest: metric((j) => j.duration, true),
-    shortest: metric((j) => j.duration, false),
-  }[sort];
-  return [...jobs].sort(cmp);
-}
+// sort + filter live in listfilter.ts (shared with the Listen tab); re-exported
+// so existing imports keep working
+export { sortJobs } from "../listfilter";
+export type { QueueSort } from "../listfilter";
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
   const n = document.createElement(tag);
@@ -419,11 +395,14 @@ export function jobRow(
   // a queued-offline mark-watched overlays the (stale) snapshot state — the
   // row reads as done, with the pending chip saying the server doesn't know yet
   const state = pendingWatched(job.episode_id) && job.state !== "watched" ? "watched" : job.state;
+  if (isSeries(job)) sub.appendChild(el("span", "chip ep", epLabel(job)));
   const chip = el("span", `chip st-${state}`, state);
   sub.appendChild(chip);
   if (hasPendingActions(job.episode_id)) sub.appendChild(el("span", "chip pending", "⇪ pending sync"));
   // flagged for a /debrief conversation on the PC — don't delete until done
   if (job.debrief) sub.appendChild(el("span", "chip debrief", "🗣 debrief"));
+  // /immerse's genre label (English, categorical) — set once curated
+  if (job.genre) sub.appendChild(el("span", "chip genre", job.genre));
   if (job.duration) sub.appendChild(el("span", "muted", ` ${fmtDur(job.duration)}`));
   if (job.comprehensibility != null)
     sub.appendChild(el("span", "muted", ` · ${Math.round(job.comprehensibility * 100)}% comp`));
@@ -556,7 +535,7 @@ export function jobRow(
     actions.appendChild(open);
   }
   // video: download once Stage 1 has it, then play in-app
-  if (HAS_VIDEO.includes(job.state)) {
+  if (canDownload(job)) {
     const ep = job.episode_id;
     if (getVideoRecord(ep)) {
       const play = el("a", "small btn", pos != null && pos > 0 ? "▶ resume" : "▶ play") as HTMLAnchorElement;
@@ -614,6 +593,12 @@ export function jobRow(
     Mirrors the server's purge rules (app.py delete_job / purge_episode). */
 function deleteMessage(job: Job): string {
   const name = job.title || job.source || job.episode_id;
+  if (isSeries(job))
+    return (
+      `Remove "${name}" from this phone?\n\nSeries episode — only the downloaded video ` +
+      `(and its subtitle sidecars) leave the phone. The PC keeps the video, transcript, ` +
+      `prep, cards and ledger history, so ⬇ brings it back for a rewatch anytime.`
+    );
   if (job.state === "watched")
     return (
       `Delete "${name}"?\n\nAlready watched ✔ — its Anki cards and ledger history are kept. ` +
@@ -632,6 +617,19 @@ function deleteMessage(job: Job): string {
     unwind happen there), then every local trace. Server failure keeps local
     state intact so the row stays visible for retry. */
 export async function removeJob(job: Job, reload: () => void, offline = false): Promise<void> {
+  // Series episodes: phone-local only. Nothing on the server is touched
+  // (DELETE is refused for them anyway) — taps, cached prep and outbox
+  // actions stay too; just the big file goes. Works offline for that reason.
+  if (isSeries(job)) {
+    if (!getVideoRecord(job.episode_id)) {
+      alert("Nothing downloaded for this episode — series rows are removed on the PC (tools.series remove).");
+      return;
+    }
+    if (!confirm(deleteMessage(job))) return;
+    await deleteVideo(job.episode_id).catch(() => {});
+    reload();
+    return;
+  }
   if (offline) {
     alert("Offline — deleting removes server artifacts, so it needs the server reachable.");
     return;
@@ -663,6 +661,74 @@ export async function removeJob(job: Job, reload: () => void, offline = false): 
   clearSubmitted(ep);
   removeEpisodeActions(ep);
   reload();
+}
+
+const collapsedKey = (slug: string) => `fp.series.collapsed.${slug}`;
+
+/** One series on the queue: a header (title · progress · resume/download the
+    next episode · collapse toggle) over its episodes in playlist order. */
+export function seriesBlock(
+  g: SeriesGroup,
+  rerender: () => void,
+  onRatingTouch?: () => void,
+  offline = false,
+): HTMLElement {
+  const block = el("div", "series");
+  if (localStorage.getItem(collapsedKey(g.slug)) === "1") block.classList.add("collapsed");
+  const head = el("div", "series-head");
+  const caret = el("span", "muted", block.classList.contains("collapsed") ? "▸" : "▾");
+  head.append(caret, el("span", "series-title", g.title));
+  const done = g.episodes.filter(isDone).length;
+  const onPhone = g.episodes.filter((j) => getVideoRecord(j.episode_id)).length;
+  head.appendChild(
+    el("span", "muted", `${done}/${g.episodes.length} watched · ${onPhone} on phone`),
+  );
+  head.addEventListener("click", () => {
+    const collapsed = block.classList.toggle("collapsed");
+    caret.textContent = collapsed ? "▸" : "▾";
+    localStorage.setItem(collapsedKey(g.slug), collapsed ? "1" : "0");
+  });
+  // resume action: play the next unwatched episode if it's on the phone, else
+  // fetch it; a finished set offers a rewatch from the top
+  const next = nextToWatch(g) ?? (onPhone ? g.episodes[0] : null);
+  if (next) {
+    const label = nextToWatch(g) ? epLabel(next) : `↺ ${epLabel(next)}`;
+    if (getVideoRecord(next.episode_id)) {
+      const play = el("a", "small btn", `▶ ${label}`) as HTMLAnchorElement;
+      play.href = `#/player/${encodeURIComponent(next.episode_id)}`;
+      play.addEventListener("click", (e) => e.stopPropagation());
+      head.appendChild(play);
+    } else if (!offline && canDownload(next)) {
+      const dl = el("button", "small", `⬇ ${label}`) as HTMLButtonElement;
+      dl.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        dl.disabled = true;
+        try {
+          await downloadVideo(next.episode_id, (frac, bytes) => {
+            dl.textContent = frac != null
+              ? `⬇ ${Math.round(frac * 100)}%`
+              : `⬇ ${Math.round(bytes / 1e6)} MB`;
+          });
+          rerender();
+        } catch (err) {
+          dl.textContent = `⬇ ${label}`;
+          dl.disabled = false;
+          alert(`download failed: ${(err as Error).message}`);
+        }
+      });
+      head.appendChild(dl);
+    }
+  }
+  block.appendChild(head);
+  const body = el("div", "series-body");
+  for (const j of g.episodes)
+    body.appendChild(
+      swipeable(jobRow(j, rerender, onRatingTouch, offline), () =>
+        void removeJob(j, rerender, offline),
+      ),
+    );
+  block.appendChild(body);
+  return block;
 }
 
 export function queueView(): HTMLElement {
@@ -713,18 +779,9 @@ export function queueView(): HTMLElement {
   let pollTimer: number | undefined;
   let lastRatingTouch = 0;
 
-  const sortSel = el("select", "small sort") as HTMLSelectElement;
-  for (const [value, label] of SORT_OPTIONS) {
-    const o = el("option", "", label) as HTMLOptionElement;
-    o.value = value;
-    sortSel.appendChild(o);
-  }
-  const savedSort = localStorage.getItem(SORT_KEY) as QueueSort | null;
-  sortSel.value = savedSort && SORT_OPTIONS.some(([v]) => v === savedSort) ? savedSort : "newest";
-  sortSel.addEventListener("change", () => {
-    localStorage.setItem(SORT_KEY, sortSel.value);
-    render();
-  });
+  // sort select (main toolbar) + status/genre/on-phone filter row; choices
+  // persist under fp.queue.*
+  const controls = listControls("fp.queue", () => render());
 
   function render(): void {
     if (!offline) status.textContent = jobs.some((j) => !isPassive(j)) ? "" : "queue is empty";
@@ -746,10 +803,15 @@ export function queueView(): HTMLElement {
       list.appendChild(row);
     }
     // passive-shelved episodes live on the Listen tab, page jobs on Pages
-    for (const j of sortJobs(
-      jobs.filter((j) => j.kind !== "page" && !isPassive(j)),
-      sortSel.value as QueueSort,
-    ))
+    const mine = jobs.filter((j) => j.kind !== "page" && !isPassive(j));
+    const { sort, filter } = controls.current();
+    const shown = sortJobs(filterJobs(mine, filter), sort);
+    controls.update(mine, shown.length);
+    if (!offline && mine.length && !shown.length) status.textContent = "nothing matches the filters";
+    const grouped = groupSeries(shown);
+    for (const g of grouped.series)
+      list.appendChild(seriesBlock(g, rerender, onRatingTouch, offline));
+    for (const j of grouped.standalone)
       list.appendChild(
         swipeable(jobRow(j, rerender, onRatingTouch, offline), () =>
           void removeJob(j, rerender, offline),
@@ -894,8 +956,9 @@ export function queueView(): HTMLElement {
     if (failed.length) alert(`some downloads failed:\n${failed.join("\n")}`);
     void load();
   });
-  toolbar.append(refresh, dlAll, sortSel, backlog);
+  toolbar.append(refresh, dlAll, controls.sort, backlog);
   root.insertBefore(toolbar, status);
+  root.insertBefore(controls.filters, status);
 
   void load();
 

@@ -54,12 +54,25 @@ export function settingsView(): HTMLElement {
   row.append(save, test, connStatus);
   root.appendChild(row);
 
+  // series playlists (series.ts): roll into the next episode when one ends
+  root.appendChild(el("h2", "", "Playback"));
+  const autoplay = el("input") as HTMLInputElement;
+  autoplay.type = "checkbox";
+  autoplay.checked = s.autoplayNext !== false;
+  autoplay.addEventListener("change", () =>
+    saveSettings({ ...getSettings(), autoplayNext: autoplay.checked }));
+  const autoplayWrap = el("label", "field check");
+  autoplayWrap.append(autoplay, el("span", "", "Autoplay the next episode of a series"));
+  root.appendChild(autoplayWrap);
+
+  const persist = () =>
+    saveSettings({ ...getSettings(), serverUrl: url.value.trim(), token: token.value.trim() });
   save.addEventListener("click", () => {
-    saveSettings({ serverUrl: url.value.trim(), token: token.value.trim() });
+    persist();
     connStatus.textContent = "saved ✔";
   });
   test.addEventListener("click", async () => {
-    saveSettings({ serverUrl: url.value.trim(), token: token.value.trim() });
+    persist();
     connStatus.textContent = "…";
     try {
       await api.health();

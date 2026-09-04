@@ -33,7 +33,8 @@ import type { KeywordInfo } from "../gloss-popup";
 import { confirmList, NO_CONFIRM } from "../lists";
 import { applyKnown, confirmFrom, fetchPaint, getCachedPaint, knownFor } from "../paint";
 import { tokenSpan } from "../prep-render";
-import { cachePrep, getCachedJobs, getCachedPrep, getTaps } from "../store";
+import { epLabel, nextEpisode } from "../series";
+import { autoplayNext, cachePrep, getCachedJobs, getCachedPrep, getTaps } from "../store";
 import { ViewRecorder } from "../viewtime";
 import {
   clearPosition,
@@ -807,6 +808,58 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     status.textContent = "⚠ playback failed — re-download the video from the queue screen";
   });
 
+  // --- series: up next --------------------------------------------------------
+  // When a box-set episode ends, offer the next one (series.ts order) with a
+  // countdown when it's already on the phone — back-to-back watching without
+  // a trip through the queue. Marking watched stays a deliberate act (prep
+  // screen / queue row), so the card only navigates.
+  const upnext = el("div", "upnext");
+  upnext.hidden = true;
+  stage.appendChild(upnext);
+  let countdown: number | undefined;
+  const hideUpnext = () => {
+    if (countdown) clearInterval(countdown);
+    countdown = undefined;
+    upnext.hidden = true;
+  };
+  video.addEventListener("ended", () => {
+    const jobs = getCachedJobs()?.jobs ?? [];
+    const next = nextEpisode(jobs, episodeId);
+    upnext.textContent = "";
+    if (!next) return;
+    const downloaded = !!getVideoRecord(next.episode_id);
+    upnext.appendChild(el("div", "muted", "up next"));
+    upnext.appendChild(el("div", "upnext-title", `${epLabel(next)} · ${next.title || next.episode_id}`));
+    const row = el("div", "btnrow");
+    const go = () => {
+      hideUpnext();
+      location.hash = `#/player/${encodeURIComponent(next.episode_id)}`;
+    };
+    if (downloaded) {
+      const playNext = el("button", "primary", "▶ play now") as HTMLButtonElement;
+      playNext.addEventListener("click", go);
+      row.appendChild(playNext);
+    } else {
+      upnext.appendChild(el("div", "muted", "not on the phone yet — ⬇ it from the queue"));
+    }
+    const stay = el("button", "", "stay here") as HTMLButtonElement;
+    stay.addEventListener("click", hideUpnext);
+    row.appendChild(stay);
+    upnext.appendChild(row);
+    upnext.hidden = false;
+    if (downloaded && autoplayNext()) {
+      let left = 8;
+      const tick = el("div", "muted", `playing in ${left}s`);
+      upnext.appendChild(tick);
+      countdown = window.setInterval(() => {
+        left -= 1;
+        tick.textContent = `playing in ${left}s`;
+        if (left <= 0) go();
+      }, 1000);
+    }
+  });
+  video.addEventListener("play", hideUpnext);
+
   // --- position: deep-link > saved; save throttled, clear near the end ----
   video.addEventListener("loadedmetadata", () => {
     scrub.max = String(video.duration || 0);
@@ -1064,6 +1117,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   // Audio mode is deliberately NOT stopped — leaving the screen is the whole
   // point (it plays on in the background); we only drop our state listener.
   const cleanup = () => {
+    hideUpnext();
     savePos();
     recorder.close();
     video.pause();

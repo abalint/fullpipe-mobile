@@ -23,6 +23,9 @@ import type {
 export interface Settings {
   serverUrl: string;
   token: string;
+  /** Series playlists: when an episode ends, count down into the next one
+      (series.ts). Absent = on. */
+  autoplayNext?: boolean;
 }
 
 const K = {
@@ -57,6 +60,10 @@ function write(key: string, value: unknown): void {
 
 export function getSettings(): Settings {
   return read<Settings>(K.settings, { serverUrl: "", token: "" });
+}
+
+export function autoplayNext(): boolean {
+  return getSettings().autoplayNext !== false;
 }
 
 export function saveSettings(s: Settings): void {
