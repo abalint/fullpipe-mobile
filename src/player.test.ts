@@ -30,7 +30,8 @@ import {
   tokenHighlight,
 } from "./views/player";
 import type { Cue, SubTier } from "./views/player";
-import { cachePrep, getTaps, saveSettings } from "./store";
+import type { PaintLists } from "./paint";
+import { cachePrep, cycleTap, getTaps, saveSettings } from "./store";
 import { clearPosition, getPosition, savePosition } from "./video";
 import type { PrepDoc } from "./types";
 
@@ -289,20 +290,26 @@ describe("tokenHighlight", () => {
     k: false,
     ...over,
   });
+  const lists = (over: Partial<PaintLists> = {}): PaintLists => ({
+    confirm: new Set(),
+    interest: new Set(),
+    shouldKnow: new Set(),
+    ...over,
+  });
   const at = (
     tier: SubTier,
     tok: ReturnType<typeof t>,
     target: string | null = null,
     cls?: string,
-    confirm?: ReadonlySet<string>,
-  ) => tokenHighlight(tok, tier, kw, hv, target, cls, confirm);
+    global?: PaintLists,
+  ) => tokenHighlight(tok, tier, kw, hv, target, cls, global);
 
   it("off tier and non-content tokens get nothing", () => {
     expect(at("off", t({ l: "公園" }))).toBeNull();
-    expect(at("all", t({ c: false }))).toBeNull();
+    expect(at("learn", t({ c: false }))).toBeNull();
   });
 
-  it("focus: keywords, high-value, and the i+1 target only", () => {
+  it("focus: keywords (pink), high-value (pink), and the i+1 target (orange) only", () => {
     expect(at("focus", t({ l: "公園" }))).toBe("kw");
     expect(at("focus", t({ l: "候補" }))).toBe("hl-hv");
     expect(at("focus", t({ l: "新語" }), "新語", "i_plus_1")).toBe("hl-target");
@@ -314,27 +321,36 @@ describe("tokenHighlight", () => {
     expect(at("focus", t({ l: "候補" }), "候補", "i_plus_1")).toBe("hl-target");
   });
 
-  it("learn: + all unknowns and the reinforcement target", () => {
+  it("learn: + every unknown in orange; a reinforcement target is just unknown", () => {
     expect(at("learn", t({ l: "新語" }))).toBe("hl-unk");
-    expect(at("learn", t({ l: "復習" }), "復習", "reinforcement")).toBe("hl-lrn");
+    expect(at("learn", t({ l: "復習" }), "復習", "reinforcement")).toBe("hl-unk");
     expect(at("learn", t({ l: "既知", k: true, f: 500 }))).toBeNull(); // known stays silent
   });
 
-  it("the think-you-know queue paints at every tier but off", () => {
-    const q = new Set(["既知", "候補"]);
+  it("the global lists paint at every tier but off and outrank the episode's hues", () => {
+    const q = lists({ confirm: new Set(["既知", "候補", "公園"]) });
     expect(at("off", t({ l: "既知", k: true }), null, undefined, q)).toBeNull();
     expect(at("focus", t({ l: "既知", k: true, f: 500 }), null, undefined, q)).toBe("hl-know");
     expect(at("learn", t({ l: "既知", k: true }), null, undefined, q)).toBe("hl-know");
-    // and it outranks the episode-local hues, but never the curated keyword
-    // or the i+1 target
+    // blue beats the candidate, the curated keyword, and the i+1 target: it
+    // is a fact about the user, not this episode
     expect(at("focus", t({ l: "候補" }), null, undefined, q)).toBe("hl-know");
-    expect(at("focus", t({ l: "公園" }), null, undefined, q)).toBe("kw");
-    expect(at("focus", t({ l: "候補" }), "候補", "i_plus_1", q)).toBe("hl-target");
+    expect(at("focus", t({ l: "公園" }), null, undefined, q)).toBe("hl-know");
+    expect(at("focus", t({ l: "候補" }), "候補", "i_plus_1", q)).toBe("hl-know");
   });
 
-  it("all: + corpus-tracked known words", () => {
-    expect(at("all", t({ l: "既知", k: true, f: 500 }))).toBe("hl-corpus");
-    expect(at("all", t({ l: "固有", k: true }))).toBeNull(); // known, not in corpus
+  it("blue › purple › green among the lists; purple and green beat pink/orange", () => {
+    const g = lists({
+      confirm: new Set(["a"]),
+      interest: new Set(["a", "b", "候補"]),
+      shouldKnow: new Set(["b", "c", "公園"]),
+    });
+    expect(at("focus", t({ l: "a" }), null, undefined, g)).toBe("hl-know");
+    expect(at("focus", t({ l: "b" }), null, undefined, g)).toBe("hl-int");
+    expect(at("focus", t({ l: "c" }), null, undefined, g)).toBe("hl-sk");
+    expect(at("focus", t({ l: "候補" }), null, undefined, g)).toBe("hl-int"); // over hl-hv
+    expect(at("focus", t({ l: "公園" }), null, undefined, g)).toBe("hl-sk"); // over kw
+    expect(at("learn", t({ l: "c" }), null, undefined, g)).toBe("hl-sk"); // over hl-unk
   });
 });
 
@@ -511,22 +527,43 @@ describe("playerView subtitle overlay", () => {
     root.remove();
   });
 
-  it("tier all tints known corpus words; learn leaves them plain", async () => {
-    setSubTier("all");
+  it("a ★ from another episode paints purple here, offline, before any sync", async () => {
+    // the word was starred while watching a different show (tap store only —
+    // nothing has reached the server); this show's sidecar and paint state
+    // know nothing about it
+    cycleTap("other-ep", "犬");
+    cycleTap("other-ep", "犬"); // → h
     const { root, video } = await mount();
-    video.dispatchEvent(new Event("timeupdate")); // 犬 line — known, rank 40
+    video.dispatchEvent(new Event("timeupdate")); // 犬 line
     const dog = root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma='犬']")!;
-    expect(dog.classList.contains("hl-corpus")).toBe(true);
+    expect(dog.classList.contains("hl-int")).toBe(true);
+    expect(dog.classList.contains("tap-h")).toBe(true);
+    expect(getTaps(EP)["犬"]).toBeUndefined(); // still no local mark in THIS episode
+    // the popup reads it as interest too, so the next tap is ✓
+    dog.click();
+    const mark = root.querySelector<HTMLButtonElement>(".gp-mark")!;
+    expect(mark.textContent).toBe("interest ★");
+    mark.click();
+    expect(getTaps(EP)["犬"]).toBe("k");
+    expect(dog.classList.contains("tap-h")).toBe(false);
+    expect(dog.classList.contains("tap-k")).toBe(true);
+    root.remove();
+  });
 
-    setSubTier("learn");
-    Object.defineProperty(video, "currentTime", { value: 0.5, configurable: true });
-    video.dispatchEvent(new Event("timeupdate")); // same cue index — force repaint
+  it("paints the sidecar's should-know words green; a local ★ turns them purple", async () => {
+    const { root, video } = await mount({ ...TRANSCRIPT, should_know: ["犬"] });
+    video.dispatchEvent(new Event("timeupdate"));
+    const dog = root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma='犬']")!;
+    expect(dog.classList.contains("hl-sk")).toBe(true);
+    cycleTap(EP, "犬");
+    cycleTap(EP, "犬"); // → h
     Object.defineProperty(video, "currentTime", { value: 2.5, configurable: true });
     video.dispatchEvent(new Event("timeupdate"));
     Object.defineProperty(video, "currentTime", { value: 0.5, configurable: true });
-    video.dispatchEvent(new Event("timeupdate"));
+    video.dispatchEvent(new Event("timeupdate")); // back on the 犬 line — repainted
     const dog2 = root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma='犬']")!;
-    expect(dog2.classList.contains("hl-corpus")).toBe(false);
+    expect(dog2.classList.contains("hl-sk")).toBe(false);
+    expect(dog2.classList.contains("hl-int")).toBe(true);
     root.remove();
   });
 

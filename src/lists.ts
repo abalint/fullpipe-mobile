@@ -5,8 +5,9 @@
 // reading surface paints it blue, cutting across the episode-local
 // highlighting. Absent on sidecars downloaded before the list existed → an
 // empty set, and the surfaces just fall back to their usual marks.
-// ("Want to learn" needs nothing here: ★-tapped words already paint violet
-// through the tap store.)
+// (The other two global lists — ★ interest and should-know — live in
+// paint.ts, which merges the sidecar snapshot with the live state and the
+// phone's own marks.)
 
 import type { TranscriptDoc } from "./types";
 

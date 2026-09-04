@@ -9,15 +9,18 @@
 // advance on real aligned token times (Token.t: ASR words/segments, or cue
 // spans for hand-sub episodes); tokens without times (episodes staged before
 // alignment existed) fall back to each line's width-proportional share of
-// the cue's speech span. Prep-doc keywords glow orange in the subs; tapping
-// one pops its gloss + curate notes. Subtitle modes: on / keyword-only (subs
-// stay hidden unless the line carries a keyword or a ★-marked word) / off.
-// Word highlighting is text-color-only (no backgrounds over video) and
-// tiered — off / focus (keywords + high-value + i+1 target) / learn (+ all
-// unknown words) / all (+ every corpus-tracked word) — with a "+1" badge on
-// i+1 lines. Cutting across the tiers, the ledger's "think you know" queue
-// (words whose exposures cleared the bar, awaiting a yes/no) paints light
-// blue wherever it lands, at any tier but off. The Aa panel holds size / height / tier prefs (global, like the
+// the cue's speech span. Subtitle modes: on / keyword-only (subs stay hidden
+// unless the line carries a curated keyword or a ★ word) / off.
+// Word highlighting is text-color-only (no backgrounds over video), six
+// paints (LIVE_REVIEW.md §6): white = known, blue = think you know, purple =
+// high interest ★, green = should know (most frequent unknowns), pink =
+// high value in this video (curated keyword — dotted, tap for its gloss —
+// or ranked candidate), orange = you don't know this (the i+1 target
+// underlined, with a "+1" badge on its line). Tiered — off / focus (the
+// global lists + pink + the target) / learn (+ every unknown in orange).
+// The three global lists are facts about the user, not this episode, so
+// they paint at any tier but off and outrank the episode-local hues. The
+// Aa panel holds size / height / tier prefs (global, like the
 // cc mode). Custom controls (audio/video toggle, prev / next line, speed,
 // furigana, fullscreen), resume position, wake lock while playing. The 🎧
 // toggle hands the current position off to the native passive-audio service
@@ -30,8 +33,18 @@ import { api } from "../api";
 import { PassiveAudio } from "../audio";
 import { createGlossPopup } from "../gloss-popup";
 import type { KeywordInfo } from "../gloss-popup";
-import { confirmList, NO_CONFIRM } from "../lists";
-import { applyKnown, confirmFrom, fetchPaint, getCachedPaint, knownFor } from "../paint";
+import { NO_CONFIRM } from "../lists";
+import {
+  applyKnown,
+  fetchPaint,
+  getCachedPaint,
+  knownFor,
+  listClass,
+  listsFor,
+  NO_LISTS,
+  paintsInterest,
+} from "../paint";
+import type { ListSnapshot, PaintLists } from "../paint";
 import { tokenSpan } from "../prep-render";
 import { epLabel, nextEpisode } from "../series";
 import { autoplayNext, cachePrep, getCachedJobs, getCachedPrep, getTaps } from "../store";
@@ -285,15 +298,16 @@ export function stepSubRise(dir: 1 | -1): number {
   return n;
 }
 
-/** Highlight intensity: nothing · curated/high-value only · + all unknown
-    words · + every corpus-tracked word. Word-level text color only — no
+/** Highlight intensity: nothing · the global lists + high-value + the i+1
+    target · + every unknown word. Word-level text color only — no
     backgrounds over video (see style.css .subs-overlay rules). */
-export type SubTier = "off" | "focus" | "learn" | "all";
-export const SUB_TIERS: SubTier[] = ["off", "focus", "learn", "all"];
+export type SubTier = "off" | "focus" | "learn";
+export const SUB_TIERS: SubTier[] = ["off", "focus", "learn"];
 const SUB_TIER_KEY = "fp.sub.tier";
 
 export function getSubTier(): SubTier {
   const raw = localStorage.getItem(SUB_TIER_KEY);
+  // "all" (the retired corpus-audit tier) reads as learn
   return (SUB_TIERS as string[]).includes(raw ?? "") ? (raw as SubTier) : "learn";
 }
 
@@ -320,11 +334,13 @@ export function isIplus1(c: Cue): boolean {
 }
 
 /** Word-level highlight class for a token at a tier, or null.
-    Priority: curated keyword > i+1 target (targets are usually candidates
-    too — the special i+1 emphasis must win) > reinforcement target >
-    think-you-know > high-value candidate > unknown > corpus-tracked. The
-    think-you-know hue outranks the episode-local ones: "the ledger is about
-    to call this known" is a fact about the user, not about this episode. */
+    Priority: the global lists first — think-you-know (blue) > high interest
+    (purple) > should-know (green) — they are facts about the user, not this
+    episode, and paint at every tier but off. Then the episode's own:
+    curated keyword (pink, dotted) > i+1 target (orange underline — targets
+    are usually candidates too, and the i+1 emphasis must win) > high-value
+    candidate (pink) > unknown (orange, learn tier only). A reinforcement
+    target (still on a young card) is just an unknown here. */
 export function tokenHighlight(
   t: Token,
   tier: SubTier,
@@ -332,23 +348,15 @@ export function tokenHighlight(
   highValue: Set<string>,
   target: string | null,
   cls?: string,
-  confirm?: ReadonlySet<string>,
+  lists?: PaintLists,
 ): string | null {
   if (tier === "off" || !t.c || !t.l) return null;
+  const global = lists ? listClass(t.l, lists) : null;
+  if (global) return global;
   if (keywords.has(t.l)) return "kw";
-  const learn = tier === "learn" || tier === "all";
-  if (t.l === target) {
-    // a true i+1 target is THE learning moment — shown at every tier but off;
-    // a reinforcement target (already on a young card) waits for learn tier
-    if (cls !== "reinforcement") return "hl-target";
-    if (learn) return "hl-lrn";
-  }
-  // the confirm queue is standing user state, not this episode's arithmetic
-  // — it paints at every tier but off
-  if (confirm?.has(t.l)) return "hl-know";
+  if (t.l === target && cls !== "reinforcement") return "hl-target";
   if (highValue.has(t.l)) return "hl-hv";
-  if (learn && !t.k) return "hl-unk";
-  if (tier === "all" && t.f != null) return "hl-corpus";
+  if (tier === "learn" && !t.k) return "hl-unk";
   return null;
 }
 
@@ -375,13 +383,17 @@ export function cueGrammarConfirm(c: Cue, grammarConfirm: ReadonlySet<string>): 
   return (c.grammar ?? []).map((g) => g.pattern).filter((p) => grammarConfirm.has(p));
 }
 
-/** kw-mode gate: does this line carry a noted keyword or a ★-marked word? */
+/** kw-mode gate: does this line carry a noted keyword or a ★ word (marked
+    here, or standing interest from any other show)? */
 export function cueTriggered(
   c: Cue,
   keywords: Map<string, KeywordInfo>,
   taps: Record<string, TapMark>,
+  interest: ReadonlySet<string> = NO_CONFIRM,
 ): boolean {
-  return !!c.tokens?.some((t) => t.l && (keywords.has(t.l) || taps[t.l] === "h"));
+  return !!c.tokens?.some(
+    (t) => t.l && (keywords.has(t.l) || paintsInterest(taps[t.l], t.l, interest)),
+  );
 }
 
 export function fmtClock(sec: number): string {
@@ -401,15 +413,20 @@ async function loadTokenCues(
 ): Promise<{
   cues: Cue[];
   candidates: string[];
-  confirm: ReadonlySet<string>;
+  snapshot: ListSnapshot; // the sidecar's copy of the global lists
   curated: boolean;
 } | null> {
+  const snap = (d: ListSnapshot): ListSnapshot => ({
+    confirm: d.confirm,
+    interest: d.interest,
+    should_know: d.should_know,
+  });
   const local = await loadLocalTranscript(ep);
   if (local?.sentences?.length)
     return {
       cues: local.sentences,
       candidates: local.candidates ?? [],
-      confirm: confirmList(local),
+      snapshot: snap(local),
       curated: local.curated ?? false,
     };
   try {
@@ -418,7 +435,7 @@ async function loadTokenCues(
       return {
         cues: doc.sentences,
         candidates: doc.candidates ?? [],
-        confirm: confirmList(doc),
+        snapshot: snap(doc),
         curated: true,
       };
   } catch {
@@ -470,6 +487,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     defs: () => defs,
     keywords: () => keywords,
     grammarConfirm: () => grammarConfirm,
+    interest: () => lists.interest,
     onMarkChanged: () => paintTaps(),
   });
   stage.append(video, overlay, popup.el);
@@ -477,17 +495,20 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   // high-value lemmas for the focus tier: the transcript's ranked candidates,
   // else (old sidecar) the prep glossary — keywords win priority either way
   let highValue = new Set<string>();
-  // the ledger's think-you-know queue for this episode — the live paint
-  // state's list when we have one, else the transcript's snapshot
-  let confirm: ReadonlySet<string> = NO_CONFIRM;
-  // curated line patterns in the grammar half of that queue (line badge)
+  // the ledger's three global lists narrowed to this episode (blue / purple
+  // / green) — the live paint state's when we have one, else the
+  // transcript's snapshot, plus this phone's own marks
+  let lists: PaintLists = NO_LISTS;
+  let snapshot: ListSnapshot = {};
+  // curated line patterns in the grammar half of the confirm queue (line badge)
   let grammarConfirm: ReadonlySet<string> = NO_CONFIRM;
   // paint.ts: the ledger's lists as of now, overlaid on the cached sidecar
-  // (known is additive; confirm/interest/grammar replace the snapshot)
+  // (known is additive; the lists and grammar replace the snapshot)
   let paint: PaintState | null = getCachedPaint(episodeId);
-  const applyPaint = (doc: { confirm?: string[] } | null) => {
+  const applyPaint = (doc: ListSnapshot) => {
+    snapshot = doc;
     applyKnown(cues, knownFor(paint));
-    confirm = confirmFrom(paint, doc as never);
+    lists = listsFor(paint, doc);
     grammarConfirm = new Set(paint?.grammar_confirm ?? []);
   };
   const fallbackHighValue = (doc: PrepDoc | null) => {
@@ -627,12 +648,28 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   let lineStarts: number[] | null = null; // ASR-aligned starts; null → weights
   let badgeLine = 0; // which line carries the +1 badge (the target's line)
 
+  /** In-place repaint of the spans on screen after a mark moves: the global
+      lists are recomputed (a ★ takes a word from green to purple, a ✓ ends
+      both), each word's highlight is re-derived, and the tap classes layered
+      on top. Keeps the span elements, so an open popup stays anchored. */
+  const HL_CLASSES = ["hl-know", "hl-int", "hl-sk", "kw", "hl-hv", "hl-target", "hl-unk"];
   const paintTaps = () => {
     const taps = getTaps(episodeId);
+    lists = listsFor(paint, snapshot);
+    const c = current >= 0 ? cues[current] : undefined;
+    const tier = getSubTier();
+    const target = c ? soleUnknown(c) : null;
     overlay.querySelectorAll<HTMLElement>(".w[data-lemma]").forEach((w) => {
-      const mark = taps[w.dataset.lemma!];
+      const lemma = w.dataset.lemma!;
+      const mark = taps[lemma];
+      const t = w.dataset.ti != null ? c?.tokens?.[Number(w.dataset.ti)] : undefined;
+      if (t) {
+        const hl = tokenHighlight(t, tier, keywords, highValue, target, c!.cls, lists);
+        w.classList.remove(...HL_CLASSES);
+        if (hl) w.classList.add(hl);
+      }
       w.classList.toggle("tap-k", mark === "k");
-      w.classList.toggle("tap-h", mark === "h");
+      w.classList.toggle("tap-h", paintsInterest(mark, lemma, lists.interest));
     });
   };
 
@@ -667,7 +704,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       if (n instanceof HTMLElement) {
         // index within the cue's full token list → inflection-chain lookup
         n.dataset.ti = String(c.tokens!.indexOf(t));
-        const hl = tokenHighlight(t, tier, keywords, highValue, target, c.cls, confirm);
+        const hl = tokenHighlight(t, tier, keywords, highValue, target, c.cls, lists);
         if (hl) n.classList.add(hl);
       }
       line.appendChild(n);
@@ -714,7 +751,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     const c = cues[i];
     const mode = getSubMode();
     if (mode === "off") return;
-    if (mode === "kw" && !cueTriggered(c, keywords, getTaps(episodeId))) return;
+    if (mode === "kw" && !cueTriggered(c, keywords, getTaps(episodeId), lists.interest)) return;
     const budget = budgetEms();
     if (c.tokens) {
       const lines = chunkTokens(c.tokens, budget);
@@ -752,14 +789,14 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       if (tokenized) {
         cues = extendCues(tokenized.cues);
         highValue = new Set(tokenized.candidates);
-        applyPaint({ confirm: [...tokenized.confirm] });
+        applyPaint(tokenized.snapshot);
         fallbackHighValue(getCachedPrep(episodeId));
-        // then the live lists: what's become known / entered the confirm
-        // queue since this sidecar was pulled — repaint if the server answers
+        // then the live lists: what's become known / entered a list since
+        // this sidecar was pulled — repaint if the server answers
         void fetchPaint(episodeId).then((fresh) => {
           if (!fresh || !root.isConnected) return;
           paint = fresh;
-          applyPaint({ confirm: [...confirm] });
+          applyPaint(snapshot);
           repaintCue();
         });
         if (!tokenized.curated || sidecarsOutdated(episodeId)) {

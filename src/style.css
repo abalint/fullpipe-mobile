@@ -1,16 +1,28 @@
 /* Visual language carried over from fullPipe/render/template.html so the
    in-app prep doc reads identically to the static one. */
 
+/* The six word paints (LIVE_REVIEW.md §6), as document washes here and as
+   text colours over video (.subs-overlay rules below):
+     white  known            — absence of colour
+     blue   think you know   --hl-know
+     purple high interest ★  --hl-int / --int
+     green  should know      --hl-sk
+     pink   high value here  (curated keyword / candidate — video only)
+     orange you don't know   --hl / --unk                                 */
 :root {
   --bg: #ffffff; --fg: #1a1a1a; --muted: #777; --card: #f4f4f6;
-  --accent: #4a90d9; --know: #2e9e5b; --dunno: #d9544a; --hl: #fff3c4;
-  --hl-know: #cfe7fb; --border: #e0e0e4;
+  --accent: #4a90d9; --know: #2e9e5b; --dunno: #d9544a;
+  --hl: #ffe3c2; --unk: #e8891a;
+  --hl-know: #cfe7fb; --hl-int: #e8d8ff; --int: #8b5cf6; --hl-sk: #d4f3dc;
+  --border: #e0e0e4;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #17181c; --fg: #e8e8ea; --muted: #9a9aa2; --card: #23242a;
-    --accent: #6aa9e9; --know: #4dbf7f; --dunno: #e9756c; --hl: #4a4020;
-    --hl-know: #1d3a52; --border: #33343c;
+    --accent: #6aa9e9; --know: #4dbf7f; --dunno: #e9756c;
+    --hl: #4a3214; --unk: #ffa040;
+    --hl-know: #1d3a52; --hl-int: #3a2a5c; --int: #b48cff; --hl-sk: #1e3d2a;
+    --border: #33343c;
   }
 }
 * { box-sizing: border-box; }
@@ -54,16 +66,17 @@ h2 { font-size: 1rem; color: var(--muted); margin: 28px 0 10px;
 .sent .time.seek { color: var(--accent); cursor: pointer; }
 
 .w { cursor: pointer; border-radius: 4px; padding: 0 1px; }
-.w.unk { background: var(--hl); }
-/* the ledger's "we think you know this; do you?" queue — standing state, not
-   this episode's arithmetic, so it paints wherever the word turns up */
-.w.hl-know { background: var(--hl-know); }
-.w.target { border-bottom: 2px solid var(--accent); font-weight: 600; }
+.w.unk { background: var(--hl); }                 /* orange: you don't know this */
+/* the three global lists — standing state, not this episode's arithmetic,
+   so they paint wherever the word turns up (after .unk so they win) */
+.w.hl-know { background: var(--hl-know); }        /* blue: think you know */
+.w.hl-int { background: var(--hl-int); }          /* purple: high interest */
+.w.hl-sk { background: var(--hl-sk); }            /* green: should know */
+.w.target { border-bottom: 2px solid var(--unk); font-weight: 600; }
 .w.tap-k { background: color-mix(in srgb, var(--know) 25%, transparent);
            outline: 1px solid var(--know); }
-.w.tap-h { background: color-mix(in srgb, var(--accent) 25%, transparent);
-           outline: 1px solid var(--accent); }
-.w.tap-h::after { content: "★"; font-size: .7em; color: var(--accent);
+.w.tap-h { background: var(--hl-int); outline: 1px solid var(--int); }
+.w.tap-h::after { content: "★"; font-size: .7em; color: var(--int);
                   vertical-align: super; }
 /* already submitted & unchanged — muted outline so newly added/changed marks
    (solid outline) read as the unsent ones */
@@ -436,23 +449,25 @@ details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: po
 /* Word-level highlighting: TEXT COLOR ONLY over video — the prep doc's
    background/outline chips (.unk/.tap-*) are explicitly neutralized here.
    Known words are encoded by absence (plain white). The black outline
-   guarantees local contrast, so hues just need to differ from white:
-   warm coral family = unknown (bright + bold when mine-worthy, dimmed when
-   rare), orange = curated keyword, amber = reinforcement, faint blue =
-   corpus-tracked (audit tier only). */
+   guarantees local contrast, so the six paints just need to differ from
+   white and from each other: blue / purple / green are the global lists,
+   pink is "high value in this video" (curated keyword or ranked candidate),
+   orange is "you don't know this" (the i+1 target underlined). */
 .subs-overlay .w.unk { background: none; }
-.subs-overlay .w.kw { color: #ff9f2e; }        /* noted keyword → tap for gloss */
-.subs-overlay .w.hl-hv { color: #ff6b52; font-weight: 700; } /* high-value candidate */
-.subs-overlay .w.hl-target {                    /* the i+1 sentence's one unknown */
-  color: #ff6b52; font-weight: 700;
-  text-decoration: underline 2px #ff6b52; text-underline-offset: 4px;
+.subs-overlay .w.kw,
+.subs-overlay .w.hl-hv { color: #ff7ab8; font-weight: 700; }    /* pink: high value here */
+.subs-overlay .w.kw {                                            /* … with a gloss to tap */
+  text-decoration: underline dotted 2px #ff7ab8; text-underline-offset: 4px;
 }
-.subs-overlay .w.hl-unk { color: #e8907e; }     /* other unknown (dimmed coral) */
-.subs-overlay .w.hl-lrn { color: #ffc94d; }     /* reinforcement — on a young card */
-.subs-overlay .w.hl-corpus { color: #b9cfe8; }  /* known, corpus-tracked (audit) */
-/* "we think you know this" (confirm queue) — no background over video, and a
-   brighter, cooler blue than the pale corpus grey-blue it sits beside */
-.subs-overlay .w.hl-know { background: none; color: #6fd0ff; }
+.subs-overlay .w.hl-unk { color: #ffa040; }                     /* orange: you don't know */
+.subs-overlay .w.hl-target {                    /* the i+1 sentence's one unknown */
+  color: #ffa040; font-weight: 700;
+  text-decoration: underline 2px #ffa040; text-underline-offset: 4px;
+}
+/* the global lists come last so they win over any episode-local class */
+.subs-overlay .w.hl-know { background: none; color: #6fd0ff; }  /* blue: think you know */
+.subs-overlay .w.hl-int { background: none; color: #c58fff; }   /* purple: high interest */
+.subs-overlay .w.hl-sk { background: none; color: #7ee787; }    /* green: should know */
 /* grammar-point-awaiting-confirm line marker: same blue as a think-you-know
    word, same badge shape as +1 */
 .subs-overlay .know-badge {
@@ -465,11 +480,12 @@ details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: po
   vertical-align: super; margin-right: 4px; user-select: none;
 }
 /* tap marks (after the hl-* rules so they win): a word marked known goes
-   back to plain white — absence IS the known signal; ★ high-interest goes
-   violet, distinct from every status hue */
+   back to plain white — absence IS the known signal; ★ high-interest is the
+   same purple as the standing list it joins */
 .subs-overlay .w.tap-k { background: none; outline: none; color: #fff;
                          font-weight: 600; text-decoration: none; }
-.subs-overlay .w.tap-h { background: none; outline: none; color: #c58fff; }
+.subs-overlay .w.tap-h { background: none; outline: none; color: #c58fff;
+                         font-weight: 500; text-decoration: none; }
 .subs-overlay .w.tap-h::after { color: #c58fff; }
 .subs-overlay ruby rt { color: #fff; font-weight: 500; }
 /* あ toggle hides furigana on the subtitle line only — the popup card always
@@ -574,7 +590,9 @@ button.pv.on { border-color: var(--accent); color: var(--accent); }
    think-you-know washes go off; the user's own tap marks stay visible
    (sparse, deliberate) */
 .reader-view.no-hl .posts .w.unk,
-.reader-view.no-hl .posts .w.hl-know { background: none; }
+.reader-view.no-hl .posts .w.hl-know,
+.reader-view.no-hl .posts .w.hl-int,
+.reader-view.no-hl .posts .w.hl-sk { background: none; }
 button.more { display: block; margin: 12px auto 24px; }
 
 /* the shared gloss card, pinned above the bottom nav on scrolling pages

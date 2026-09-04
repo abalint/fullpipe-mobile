@@ -38,6 +38,9 @@ export interface GlossPopupOptions {
   /** Curated grammar patterns awaiting the user's confirm (paint.ts) — the
       line note paints them blue. */
   grammarConfirm?: () => ReadonlySet<string>;
+  /** The standing high-interest set (paint.ts interestFor) — a word starred
+      in another episode shows "interest ★" here too; the next tap is ✓. */
+  interest?: () => ReadonlySet<string>;
   episodeId: string;
   /** Live getters — defs/keywords load async and refresh after the popup is
       built, so the popup reads them at show() time, never at create() time. */
@@ -79,11 +82,9 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
     pop.textContent = "";
     const head = el("div", "gp-head");
     head.appendChild(rubyWord(lemma, info?.entry.reading ?? entries[0]?.r[0]));
-    const mark = el(
-      "button",
-      "gp-mark",
-      markLabel(getTaps(opts.episodeId)[lemma]),
-    ) as HTMLButtonElement;
+    const local = getTaps(opts.episodeId)[lemma];
+    const standing = local === undefined && opts.interest?.().has(lemma) ? "h" : local;
+    const mark = el("button", "gp-mark", markLabel(standing)) as HTMLButtonElement;
     mark.addEventListener("click", (e) => {
       e.stopPropagation();
       mark.textContent = markLabel(cycleTap(opts.episodeId, lemma));

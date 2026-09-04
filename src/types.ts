@@ -104,9 +104,12 @@ export interface TranscriptDoc {
       that appear here (absent on old sidecars) — painted blue in the player
       and the page reader (src/lists.ts). */
   confirm?: string[];
-  /** The standing "want to learn" set, same narrowing. On the wire but not
-      painted: ★-tapped words already show through the tap store. */
+  /** The standing "want to learn" set (★ in any episode), same narrowing —
+      painted purple everywhere (paint.ts interestFor). */
   interest?: string[];
+  /** "You should know this": the most frequent corpus words not yet known,
+      same narrowing — painted green (absent on old sidecars). */
+  should_know?: string[];
   sentences: TranscriptSentence[];
 }
 
@@ -119,6 +122,7 @@ export interface PaintState {
   known: string[];
   confirm: string[];
   interest: string[];
+  should_know?: string[]; // absent from old cached states
   grammar_confirm: string[];
   at: string;
 }

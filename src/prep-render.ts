@@ -5,6 +5,8 @@
 
 import type { PrepDoc, Segs, Sentence, Token } from "./types";
 import { cycleTap, getSubmitted, getTaps, pendingTapCount } from "./store";
+import { listClass, NO_LISTS, paintsInterest } from "./paint";
+import type { PaintLists } from "./paint";
 
 const HAS_KANJI = /[㐀-鿿々〆]/;
 
@@ -122,8 +124,12 @@ export interface PrepRenderOptions {
       differing from the last submit) — e.g. to refresh a submit-button badge. */
   onTapsChanged?: (pending: number) => void;
   /** Receives the renderer's tap-repaint fn so the caller can re-sync marks
-      (e.g. after a submit re-styles them as committed). */
+      (e.g. after a submit re-styles them as committed, or when live paint
+      state arrives). */
   registerRefresh?: (refresh: () => void) => void;
+  /** The three global lists (paint.ts listsFor) — read live on every
+      repaint, so a ★ from another show paints purple here too. */
+  lists?: () => PaintLists;
 }
 
 export function renderPrep(doc: PrepDoc, opts: PrepRenderOptions = {}): HTMLElement {
@@ -133,11 +139,16 @@ export function renderPrep(doc: PrepDoc, opts: PrepRenderOptions = {}): HTMLElem
   const refreshTapClasses = () => {
     const taps = getTaps(epId);
     const submitted = getSubmitted(epId);
+    const lists = opts.lists?.() ?? NO_LISTS;
     root.querySelectorAll<HTMLElement>(".w[data-lemma]").forEach((w) => {
       const lemma = w.dataset.lemma!;
       const mark = taps[lemma];
+      const lc = listClass(lemma, lists);
+      w.classList.toggle("hl-know", lc === "hl-know");
+      w.classList.toggle("hl-int", lc === "hl-int");
+      w.classList.toggle("hl-sk", lc === "hl-sk");
       w.classList.toggle("tap-k", mark === "k");
-      w.classList.toggle("tap-h", mark === "h");
+      w.classList.toggle("tap-h", paintsInterest(mark, lemma, lists.interest));
       // "committed" = already submitted and unchanged since; dimmed so newly
       // added/changed marks stand out as the unsent ones.
       w.classList.toggle("tap-committed", mark !== undefined && submitted[lemma] === mark);

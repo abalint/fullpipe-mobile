@@ -82,7 +82,25 @@ export function cycleTap(episodeId: string, lemma: string): TapMark | undefined 
   else if (taps[lemma] === "h") delete taps[lemma];
   else taps[lemma] = "k";
   write(K.taps(episodeId), taps);
+  // the journal follows the latest mark anywhere; cycling back to no mark
+  // withdraws it (the server keeps whatever was already submitted)
+  const journal = getMarkJournal();
+  if (taps[lemma]) journal[lemma] = taps[lemma];
+  else delete journal[lemma];
+  write(MARKS_KEY, journal);
   return taps[lemma];
+}
+
+// ---- global mark journal ------------------------------------------------------
+// Every ✓ / ★ made on this phone, by lemma, regardless of episode — the
+// latest mark wins. The per-episode tap stores above are cleared at close-out
+// (Mark watched, delete), but a ★ must keep painting purple in the next show
+// even when the phone is offline and the batch is still in the outbox, so the
+// paint layer (paint.ts locallyMarked) sweeps this too. Never cleared.
+const MARKS_KEY = "fp.marks";
+
+export function getMarkJournal(): Record<string, TapMark> {
+  return read(MARKS_KEY, {});
 }
 
 export function clearTaps(episodeId: string): void {

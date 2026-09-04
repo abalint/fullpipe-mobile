@@ -4,7 +4,7 @@
 // close-out happens locally now, the server catches up at the next sync.
 
 import { api, ApiError } from "../api";
-import { applyKnown, fetchPaint, getCachedPaint, knownFor } from "../paint";
+import { applyKnown, fetchPaint, getCachedPaint, knownFor, listsFor } from "../paint";
 import { renderPrep } from "../prep-render";
 import {
   cachePrep,
@@ -36,6 +36,10 @@ export function prepView(episodeId: string): HTMLElement {
   root.appendChild(status);
 
   let current: PrepDoc | null = null;
+  // the rendered doc's mark/list repaint (renderPrep hands it over) — called
+  // when live paint state lands so the global lists colour in without a
+  // rebuild
+  let repaintMarks: () => void = () => {};
 
   async function load(): Promise<void> {
     const cached: PrepDoc | null = getCachedPrep(episodeId);
@@ -57,11 +61,12 @@ export function prepView(episodeId: string): HTMLElement {
         status.textContent = `⚠ not cached and server unreachable — ${(e as Error).message}`;
     }
     // live paint state (paint.ts): words the ledger now calls known lose
-    // their unknown wash — the doc's token flags froze at coverage time
+    // their unknown wash — the doc's token flags froze at coverage time —
+    // and the global lists (blue / purple / green) take their current shape
     const st = await fetchPaint(episodeId);
-    if (st && current && root.isConnected &&
-        applyKnown(Object.values(current.sentences_by_idx), knownFor(st)))
-      show(current);
+    if (!st || !current || !root.isConnected) return;
+    if (applyKnown(Object.values(current.sentences_by_idx), knownFor(st))) show(current);
+    else repaintMarks();
   }
 
   function show(doc: PrepDoc): void {
@@ -145,7 +150,8 @@ export function prepView(episodeId: string): HTMLElement {
     let refreshTaps = () => {};
     const body = renderPrep(doc, {
       onTapsChanged: updateSubmit,
-      registerRefresh: (fn) => (refreshTaps = fn),
+      registerRefresh: (fn) => (refreshTaps = repaintMarks = fn),
+      lists: () => listsFor(getCachedPaint(episodeId), null),
       // sentence timestamps jump into the in-app player at that moment
       onSeek: (sec) =>
         (location.hash = `#/player/${encodeURIComponent(episodeId)}/${Math.floor(sec)}`),

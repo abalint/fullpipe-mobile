@@ -8,8 +8,18 @@
 // be swiped away on the Pages tab.
 
 import { createGlossPopup } from "../gloss-popup";
-import { NO_CONFIRM } from "../lists";
-import { applyKnown, confirmFrom, fetchPaint, getCachedPaint, knownFor } from "../paint";
+import {
+  applyKnown,
+  fetchPaint,
+  getCachedPaint,
+  knownFor,
+  listClass,
+  listsFor,
+  NO_LISTS,
+  paintsInterest,
+  sameLists,
+} from "../paint";
+import type { ListSnapshot, PaintLists } from "../paint";
 import { tokenSpan } from "../prep-render";
 import {
   downloadPage,
@@ -86,15 +96,18 @@ export function readerView(episodeId: string): HTMLElement {
 
   let doc: PageDoc | null = null;
   let sentences: TranscriptSentence[] = [];
-  // the ledger's think-you-know queue for this thread (blue), from the
-  // transcript bundle — standing state, so it paints like the unknown wash
-  let thinkKnown: ReadonlySet<string> = NO_CONFIRM;
+  // the ledger's global lists for this thread (blue think-you-know, purple
+  // ★ interest, green should-know), live state over the bundle's snapshot —
+  // standing state, so they paint like the unknown wash
+  let lists: PaintLists = NO_LISTS;
+  let snapshot: ListSnapshot = {}; // the bundle's copy of the lists
   let defs: Definitions = {};
   let rendered = 0; // posts painted so far
 
   const popup = createGlossPopup({
     episodeId,
     defs: () => defs,
+    interest: () => lists.interest,
     onMarkChanged: () => {
       paintTaps();
       syncSubmit();
@@ -106,10 +119,17 @@ export function readerView(episodeId: string): HTMLElement {
   const paintTaps = () => {
     const taps = getTaps(episodeId);
     const submitted = getSubmitted(episodeId);
+    // marks moved → the lists moved (a ★ takes a word green → purple)
+    lists = listsFor(getCachedPaint(episodeId), snapshot);
     posts.querySelectorAll<HTMLElement>(".w[data-lemma]").forEach((w) => {
-      const mark = taps[w.dataset.lemma!];
+      const lemma = w.dataset.lemma!;
+      const mark = taps[lemma];
+      const lc = listClass(lemma, lists);
+      w.classList.toggle("hl-know", lc === "hl-know");
+      w.classList.toggle("hl-int", lc === "hl-int");
+      w.classList.toggle("hl-sk", lc === "hl-sk");
       w.classList.toggle("tap-k", mark === "k");
-      w.classList.toggle("tap-h", mark === "h");
+      w.classList.toggle("tap-h", paintsInterest(mark, lemma, lists.interest));
       w.classList.toggle("tap-committed", mark !== undefined && submitted[w.dataset.lemma!] === mark);
     });
   };
@@ -178,7 +198,8 @@ export function readerView(episodeId: string): HTMLElement {
           if (n instanceof HTMLElement) {
             n.dataset.si = String(si);
             n.dataset.ti = String(ti);
-            if (t.l && thinkKnown.has(t.l)) n.classList.add("hl-know");
+            const lc = listClass(t.l, lists);
+            if (lc) n.classList.add(lc);
           }
           ln.appendChild(n);
         });
@@ -262,7 +283,8 @@ export function readerView(episodeId: string): HTMLElement {
       // since, the current think-you-know list; cached copy first
       const paint = getCachedPaint(episodeId);
       applyKnown(sentences, knownFor(paint));
-      thinkKnown = confirmFrom(paint, transcript);
+      snapshot = transcript ?? {};
+      lists = listsFor(paint, snapshot);
       defs = (await loadLocalPageDefinitions(episodeId)) ?? {};
       if (!doc || !sentences.length) throw new Error("page bundle incomplete — re-download");
       titleEl.textContent = doc.title;
@@ -273,9 +295,9 @@ export function readerView(episodeId: string): HTMLElement {
       void fetchPaint(episodeId).then((fresh) => {
         if (!fresh || !root.isConnected) return;
         const moved = applyKnown(sentences, knownFor(fresh));
-        const list = new Set(fresh.confirm);
-        const same = list.size === thinkKnown.size && [...list].every((l) => thinkKnown.has(l));
-        thinkKnown = list;
+        const next = listsFor(fresh, snapshot);
+        const same = sameLists(next, lists);
+        lists = next;
         if (moved || !same) repaintPosts();
       });
       // the /immerse page pass may have enriched the dictionary since the
@@ -286,7 +308,8 @@ export function readerView(episodeId: string): HTMLElement {
           sentences = fresh.sentences;
           const st = getCachedPaint(episodeId);
           applyKnown(sentences, knownFor(st));
-          thinkKnown = confirmFrom(st, fresh);
+          snapshot = fresh;
+          lists = listsFor(st, snapshot);
           defs = (await loadLocalPageDefinitions(episodeId)) ?? defs;
         });
       }
