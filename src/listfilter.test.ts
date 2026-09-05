@@ -27,8 +27,10 @@ describe("filterJobs", () => {
     job("pushing", { state: "pushing", genre: "documentary" }),
     job("work", { state: "transcribing" }),
     job("dead", { state: "failed", genre: "vlog" }),
+    job("half", { state: "staged" }), // started, left at 4:00
   ];
   const onPhone = (id: string) => id === "done" || id === "ready";
+  const positionOf = (id: string) => (id === "half" ? 240 : id === "done" ? 0 : null);
 
   it("passes everything through with no filter", () => {
     expect(ids(filterJobs(jobs, { status: "all", genre: "", onPhone: false }, onPhone)))
@@ -36,11 +38,24 @@ describe("filterJobs", () => {
   });
   it("buckets by status", () => {
     expect(ids(filterJobs(jobs, { status: "towatch", genre: "", onPhone: false }, onPhone)))
-      .toEqual(["ready"]);
+      .toEqual(["ready", "half"]);
     expect(ids(filterJobs(jobs, { status: "watched", genre: "", onPhone: false }, onPhone)))
       .toEqual(["done", "pushing"]);
     expect(ids(filterJobs(jobs, { status: "working", genre: "", onPhone: false }, onPhone)))
       .toEqual(["work", "dead"]);
+  });
+  it('"in progress" is a saved playback position, not a pipeline state', () => {
+    // a position of 0 (never really started) or none at all is not in progress
+    expect(ids(filterJobs(jobs, { status: "partway", genre: "", onPhone: false }, onPhone, positionOf)))
+      .toEqual(["half"]);
+    // the default lookup reads the player's saved position
+    localStorage.setItem("fp.pos.ready", "12.5");
+    try {
+      expect(ids(filterJobs(jobs, { status: "partway", genre: "", onPhone: false }, onPhone)))
+        .toEqual(["ready"]);
+    } finally {
+      localStorage.removeItem("fp.pos.ready");
+    }
   });
   it("narrows by genre and by what is downloaded, together", () => {
     expect(ids(filterJobs(jobs, { status: "all", genre: "vlog", onPhone: false }, onPhone)))

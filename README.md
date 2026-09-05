@@ -83,7 +83,7 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   finished) sends any still-debouncing marks first.
 - **Sort + filter** (Queue and Listen tabs, `listfilter.ts`): the sort select
   (newest / oldest / easiest / hardest / longest / shortest / top rated /
-  title) plus a filter row — status (to watch · watched · in progress),
+  title) plus a filter row — status (to watch · in progress = started and left partway · watched · preparing),
   **genre** (the English label `/immerse` curation gave the episode:
   documentary, vlog, explainer, comedy, interview …, offered only from what's
   on screen), and an **⬇ on phone** toggle for downloaded episodes. Every row

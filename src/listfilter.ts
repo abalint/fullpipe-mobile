@@ -3,7 +3,7 @@
 // them. Choices persist per tab in localStorage so the list comes back the
 // way you left it.
 
-import { getVideoRecord } from "./video";
+import { getPosition, getVideoRecord } from "./video";
 import type { Job, JobState } from "./types";
 
 export type QueueSort =
@@ -55,14 +55,17 @@ export function sortJobs(jobs: Job[], sort: QueueSort): Job[] {
 }
 
 /** Status buckets for the queue filter. "to watch" is curated-and-unwatched
-    (what the backlog counts); "watched" includes the close-out still pushing
-    cards; everything else is the pipeline still working (or failed). */
-export type StatusFilter = "all" | "towatch" | "watched" | "working";
+    (what the backlog counts); "in progress" is anything with a saved playback
+    position — started and left partway, whatever its pipeline state (the rows
+    with the thin watch bar); "watched" includes the close-out still pushing
+    cards; "preparing" is the pipeline still working (or failed). */
+export type StatusFilter = "all" | "towatch" | "partway" | "watched" | "working";
 export const STATUS_OPTIONS: [StatusFilter, string][] = [
   ["all", "any status"],
   ["towatch", "to watch"],
+  ["partway", "in progress"],
   ["watched", "watched"],
-  ["working", "in progress"],
+  ["working", "preparing"],
 ];
 const TO_WATCH: JobState[] = ["staged", "reconciled"];
 const WATCHED: JobState[] = ["watched", "pushing"];
@@ -88,9 +91,11 @@ export function filterJobs(
   jobs: Job[],
   f: ListFilter,
   hasVideo: (episodeId: string) => boolean = (id) => !!getVideoRecord(id),
+  positionOf: (episodeId: string) => number | null = getPosition,
 ): Job[] {
   return jobs.filter((j) => {
     if (f.status === "towatch" && !TO_WATCH.includes(j.state)) return false;
+    if (f.status === "partway" && !((positionOf(j.episode_id) ?? 0) > 0)) return false;
     if (f.status === "watched" && !WATCHED.includes(j.state)) return false;
     if (f.status === "working" && (TO_WATCH.includes(j.state) || WATCHED.includes(j.state)))
       return false;
