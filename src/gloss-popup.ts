@@ -79,7 +79,7 @@ function el(tag: string, cls?: string, text?: string): HTMLElement {
 }
 
 const markLabel = (m: TapMark | undefined) =>
-  m === "k" ? "known ✓" : m === "h" ? "interest ★" : "mark";
+  m === "k" ? "known ✓" : m === "h" ? "interest ★" : m === "u" ? "unknown ✗" : "mark";
 
 export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
   const pop = el("div", `gloss-pop${opts.extraClass ? ` ${opts.extraClass}` : ""}`);

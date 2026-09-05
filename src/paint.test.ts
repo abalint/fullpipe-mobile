@@ -8,12 +8,14 @@ import { clearTaps, cycleTap, phraseTapKey, submitTaps } from "./store";
 import type { PaintState, TranscriptDoc } from "./types";
 import {
   applyKnown,
+  applyPaintKnown,
   cachePaint,
   confirmFrom,
   fetchPaint,
   getCachedPaint,
   interestFor,
   knownFor,
+  locallyUnknown,
   listClass,
   listsFor,
   locallyInterest,
@@ -25,6 +27,7 @@ import {
   phrasesAt,
   sameLists,
   shouldKnowFor,
+  unknownFor,
 } from "./paint";
 import { cueGrammarConfirm } from "./views/player";
 
@@ -100,9 +103,39 @@ describe("paint", () => {
     expect(locallyInterest().size).toBe(0);
     expect(locallyKnown()).toEqual(new Set(["流れ"]));
     cycleTap("ep2", "流れ"); // h
+    cycleTap("ep2", "流れ"); // u — "I don't know this"
+    expect(locallyInterest().size).toBe(0);
+    expect(locallyUnknown()).toEqual(new Set(["流れ"]));
     cycleTap("ep2", "流れ"); // cleared
     expect(locallyInterest().size).toBe(0);
     expect(locallyKnown().size).toBe(0);
+    expect(locallyUnknown().size).toBe(0);
+  });
+
+  it("a ✗ takes a word out of known — the sidecar's frozen k, the server's list, a stale ✓", () => {
+    cycleTap("ep1", "以下"); // k in an unfinished show
+    cycleTap("ep2", "以下"); cycleTap("ep2", "以下"); cycleTap("ep2", "以下"); // → u tonight
+    // the journal holds the latest mark, so the ✗ beats ep1's stale ✓
+    expect(locallyKnown().has("以下")).toBe(false);
+    expect(locallyUnknown()).toEqual(new Set(["以下"]));
+    const st = state({ known: ["以下", "盗む"], unknown: ["犬"] });
+    expect(knownFor(st)).toEqual(new Set(["盗む"]));
+    expect(unknownFor(st)).toEqual(new Set(["以下", "犬"]));
+    // a ✓ made here since the ledger's ✗ is the newer word
+    cycleTap("ep3", "犬"); // k
+    expect(unknownFor(st)).toEqual(new Set(["以下"]));
+    expect(knownFor(st)).toEqual(new Set(["盗む", "犬"]));
+  });
+
+  it("applyPaintKnown flips ✗'d tokens back to unknown, known ones forward", () => {
+    const sentences = [
+      { tokens: [{ s: "以下", l: "以下", c: true, k: true }, { s: "犬", l: "犬", c: true, k: false }] },
+    ];
+    const st = state({ known: ["犬"], unknown: ["以下"] });
+    expect(applyPaintKnown(sentences, st)).toBe(2);
+    expect(sentences[0].tokens[0].k).toBe(false);
+    expect(sentences[0].tokens[1].k).toBe(true);
+    expect(applyPaintKnown(sentences, st)).toBe(0); // idempotent
   });
 
   it("a ★ that graduated to blue (or known) on the ledger no longer paints purple", () => {
@@ -174,6 +207,7 @@ describe("phrase axis", () => {
     expect(phraseClass(p, undefined, lists)).toBe("ph-unk");
     expect(phraseClass({ ...p, status: "known" }, undefined, lists)).toBe("ph-known");
     expect(phraseClass(p, "k", lists)).toBe("ph-known");
+    expect(phraseClass({ ...p, status: "known" }, "u", lists)).toBe("ph-unk"); // ✗ un-knows it
     expect(phraseClass(p, "h", lists)).toBe("ph-int");
     const live = phraseListsFor(state({ phrase_known: [], phrase_confirm: ["血が騒ぐ"] }));
     expect(live.live).toBe(true);

@@ -60,7 +60,7 @@ describe("renderPrep", () => {
     masked.forEach((m) => expect(m.textContent).toBe("···"));
   });
 
-  it("cycles taps known → high-interest → clear and persists them", () => {
+  it("cycles taps known → high-interest → unknown → clear and persists them", () => {
     const root = renderPrep(doc);
     document.body.appendChild(root);
     const w = root.querySelector<HTMLElement>(".gloss .w[data-lemma]")!;
@@ -75,7 +75,13 @@ describe("renderPrep", () => {
     expect(w.classList.contains("tap-h")).toBe(true);
 
     w.click();
+    expect(getTaps(ep)[lemma]).toBe("u");
+    expect(w.classList.contains("tap-u")).toBe(true);
+    expect(w.classList.contains("tap-h")).toBe(false);
+
+    w.click();
     expect(getTaps(ep)[lemma]).toBeUndefined();
+    expect(w.classList.contains("tap-u")).toBe(false);
     root.remove();
   });
 });

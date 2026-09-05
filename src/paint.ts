@@ -7,7 +7,9 @@
 // This module overlays the ledger's *current* lists on whatever is cached:
 // fetched per episode (tiny — narrowed to its lemmas), kept in localStorage
 // for offline reopen, and topped up with every word tapped known on this
-// phone (instant, needs no server). Known is additive only; the confirm /
+// phone (instant, needs no server). Known is additive except for the ✗
+// axis — a word marked unknown (here, or on the ledger: `unknown`) is taken
+// back OUT of known, the sidecar's frozen `k` notwithstanding; the confirm /
 // interest / should-know lists and the grammar half of the confirm queue
 // replace the sidecar's copies.
 //
@@ -65,13 +67,16 @@ function locallyMarked(mark: TapMark, phrases = false): Set<string> {
     if (m !== mark || isPhraseTapKey(key) !== phrases) return;
     out.add(phrases ? phraseFromTapKey(key) : key);
   };
-  for (const [key, m] of Object.entries(getMarkJournal())) take(key, m);
+  // the journal holds the LATEST mark per key, so it outranks a stale mark
+  // still sitting in an unfinished episode's store (✓ there, ✗ since)
+  const journal = getMarkJournal();
+  for (const [key, m] of Object.entries(journal)) take(key, m);
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i)!;
     if (!k.startsWith("fp.taps.")) continue;
     try {
       const taps = JSON.parse(localStorage.getItem(k) || "{}") as Record<string, string>;
-      for (const [key, m] of Object.entries(taps)) take(key, m);
+      for (const [key, m] of Object.entries(taps)) if (!(key in journal)) take(key, m);
     } catch {
       /* a corrupt entry paints nothing */
     }
@@ -87,6 +92,11 @@ export function locallyKnown(): Set<string> {
 /** Every lemma currently starred (★) in any episode's tap store. */
 export function locallyInterest(): Set<string> {
   return locallyMarked("h");
+}
+
+/** Every lemma currently marked unknown (✗) in any episode's tap store. */
+export function locallyUnknown(): Set<string> {
+  return locallyMarked("u");
 }
 
 // ---- phrases: the second axis ---------------------------------------------------
@@ -118,6 +128,7 @@ export const NO_PHRASES: PhraseLists = {
 export function phraseListsFor(state: PaintState | null): PhraseLists {
   const known = locallyMarked("k", true);
   for (const p of state?.phrase_known ?? []) known.add(p);
+  for (const p of locallyMarked("u", true)) known.delete(p);
   const confirm = new Set(state?.phrase_confirm ?? []);
   const interest = locallyMarked("h", true);
   for (const p of state?.phrase_interest ?? []) interest.add(p);
@@ -137,7 +148,7 @@ export function samePhraseLists(a: PhraseLists, b: PhraseLists): boolean {
     phrase paints as one word): ph-known (no colour — known is the absence
     of paint), ph-know (blue, think you know), ph-int (purple ★), ph-unk
     (orange, you don't know it as a unit). `mark` is the phone's own mark on
-    the phrase; a ✓ wins, then a ★, then the ledger. */
+    the phrase; a ✓ / ★ / ✗ wins, then the ledger. */
 export function phraseClass(
   p: SentencePhrase,
   mark: TapMark | undefined,
@@ -145,6 +156,7 @@ export function phraseClass(
 ): "ph-known" | "ph-know" | "ph-int" | "ph-unk" {
   if (mark === "k") return "ph-known";
   if (mark === "h") return "ph-int";
+  if (mark === "u") return "ph-unk";
   if (lists.known.has(p.canonical)) return "ph-known";
   if (lists.confirm.has(p.canonical)) return "ph-know";
   if (lists.interest.has(p.canonical)) return "ph-int";
@@ -254,29 +266,56 @@ export function paintsInterest(
 }
 
 /** The known set to paint with: the server's list for this episode (when
-    we have one) plus everything tapped known here. */
+    we have one) plus everything tapped known here, minus every ✗ — the
+    phone's own (its latest mark on the word) or the ledger's. */
 export function knownFor(state: PaintState | null): Set<string> {
   const s = locallyKnown();
   for (const l of state?.known ?? []) s.add(l);
+  for (const l of unknownFor(state)) s.delete(l);
   return s;
 }
 
-/** Flip tokens to known in place (additive). Returns how many changed, so
-    callers can skip a repaint when nothing moved. */
+/** The set to take back OUT of known: every ✗ on this phone plus the
+    ledger's ✗'d words, minus a ✓ made here since (the phone's mark is the
+    newer one until it syncs). This is the only paint that undoes the
+    sidecar's frozen token `k`. */
+export function unknownFor(state: PaintState | null): Set<string> {
+  const s = locallyUnknown();
+  for (const l of state?.unknown ?? []) s.add(l);
+  for (const l of locallyKnown()) s.delete(l);
+  return s;
+}
+
+/** Flip tokens' known flag in place: to known for `known` lemmas, back to
+    unknown for `unknown` ones. Returns how many changed, so callers can
+    skip a repaint when nothing moved. */
 export function applyKnown(
   sentences: Iterable<{ tokens?: Token[] }>,
   known: ReadonlySet<string>,
+  unknown: ReadonlySet<string> = new Set(),
 ): number {
   let n = 0;
   for (const s of sentences) {
     for (const t of s.tokens ?? []) {
-      if (!t.k && t.l && known.has(t.l)) {
+      if (!t.l) continue;
+      if (!t.k && known.has(t.l)) {
         t.k = true;
+        n++;
+      } else if (t.k && unknown.has(t.l)) {
+        t.k = false;
         n++;
       }
     }
   }
   return n;
+}
+
+/** applyKnown from a paint state: known in, ✗'d back out. */
+export function applyPaintKnown(
+  sentences: Iterable<{ tokens?: Token[] }>,
+  state: PaintState | null,
+): number {
+  return applyKnown(sentences, knownFor(state), unknownFor(state));
 }
 
 /** The think-you-know list: the live state's when we have it, else the

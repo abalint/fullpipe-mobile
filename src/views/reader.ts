@@ -9,10 +9,9 @@
 
 import { createGlossPopup } from "../gloss-popup";
 import {
-  applyKnown,
+  applyPaintKnown,
   fetchPaint,
   getCachedPaint,
-  knownFor,
   listClass,
   listsFor,
   NO_LISTS,
@@ -134,9 +133,21 @@ export function readerView(episodeId: string): HTMLElement {
       w.classList.toggle("hl-sk", lc === "hl-sk");
       w.classList.toggle("tap-k", mark === "k");
       w.classList.toggle("tap-h", paintsInterest(mark, lemma, lists.interest));
+      w.classList.toggle("tap-u", mark === "u");
       w.classList.toggle("tap-committed", mark !== undefined && submitted[w.dataset.lemma!] === mark);
     });
   };
+
+  /** Pull the ledger's lists as of now and repaint if anything moved. */
+  const livePaint = () =>
+    fetchPaint(episodeId).then((fresh) => {
+      if (!fresh || !root.isConnected) return;
+      const moved = applyPaintKnown(sentences, fresh);
+      const next = listsFor(fresh, snapshot);
+      const same = sameLists(next, lists);
+      lists = next;
+      if (moved || !same) repaintPosts();
+    });
 
   const syncState = () => {
     const n = pendingTapCount(episodeId);
@@ -150,10 +161,13 @@ export function readerView(episodeId: string): HTMLElement {
         ? "marks queued — will sync when reachable"
         : "";
   };
-  onTapSync((ep) => {
+  onTapSync((ep, result) => {
     if (ep !== episodeId || !root.isConnected) return;
     paintTaps();
     syncState();
+    // the ledger re-judged on arrival: a ✗ may have dropped a word onto the
+    // blue / green list — pull the lists so it paints in this sitting
+    if (result?.sent) void livePaint();
   });
 
   const syncDone = () => {
@@ -290,7 +304,7 @@ export function readerView(episodeId: string): HTMLElement {
       // live paint state (paint.ts) over the cached bundle: words known
       // since, the current think-you-know list; cached copy first
       const paint = getCachedPaint(episodeId);
-      applyKnown(sentences, knownFor(paint));
+      applyPaintKnown(sentences, paint);
       snapshot = transcript ?? {};
       lists = listsFor(paint, snapshot);
       defs = (await loadLocalPageDefinitions(episodeId)) ?? {};
@@ -302,14 +316,7 @@ export function readerView(episodeId: string): HTMLElement {
       syncDone();
       // marks made before this reopen and never sent (app killed mid-debounce)
       if (pendingTapCount(episodeId)) scheduleTapSync(episodeId);
-      void fetchPaint(episodeId).then((fresh) => {
-        if (!fresh || !root.isConnected) return;
-        const moved = applyKnown(sentences, knownFor(fresh));
-        const next = listsFor(fresh, snapshot);
-        const same = sameLists(next, lists);
-        lists = next;
-        if (moved || !same) repaintPosts();
-      });
+      void livePaint();
       // the /immerse page pass may have enriched the dictionary since the
       // bundle was pulled — refresh quietly and swap the defs in
       if (!rec.curated) {
@@ -317,7 +324,7 @@ export function readerView(episodeId: string): HTMLElement {
           if (!fresh || !root.isConnected) return;
           sentences = fresh.sentences;
           const st = getCachedPaint(episodeId);
-          applyKnown(sentences, knownFor(st));
+          applyPaintKnown(sentences, st);
           snapshot = fresh;
           lists = listsFor(st, snapshot);
           defs = (await loadLocalPageDefinitions(episodeId)) ?? defs;

@@ -87,6 +87,23 @@ describe("gloss popup phrase layer", () => {
     expect(getTaps("ep1")).toEqual({ [phraseTapKey("血が騒ぐ")]: "k" });
   });
 
+  it("the mark button cycles ✓ → ★ → ✗ → clear, on the phrase and the word alike", () => {
+    const pop = popup();
+    pop.show("血", 4, sentence);
+    const btn = pop.el.querySelector(".gp-word .gp-mark") as HTMLButtonElement;
+    const labels: string[] = [btn.textContent!];
+    for (let i = 0; i < 4; i++) {
+      btn.click();
+      labels.push(btn.textContent!);
+    }
+    expect(labels).toEqual(["mark", "known ✓", "interest ★", "unknown ✗", "mark"]);
+    expect(getTaps("ep1")).toEqual({});
+    const pbtn = pop.el.querySelector(".gp-phrase .gp-mark") as HTMLButtonElement;
+    pbtn.click(); pbtn.click(); pbtn.click();
+    expect(pbtn.textContent).toBe("unknown ✗");
+    expect(getTaps("ep1")).toEqual({ [phraseTapKey("血が騒ぐ")]: "u" });
+  });
+
   it("a standing ★ on the phrase reads as interest until the phone marks it", () => {
     const pop = popup(new Set(["血が騒ぐ"]));
     pop.show("騒ぐ", 6, sentence);

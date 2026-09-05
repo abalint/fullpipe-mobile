@@ -149,6 +149,7 @@ export function renderPrep(doc: PrepDoc, opts: PrepRenderOptions = {}): HTMLElem
       w.classList.toggle("hl-sk", lc === "hl-sk");
       w.classList.toggle("tap-k", mark === "k");
       w.classList.toggle("tap-h", paintsInterest(mark, lemma, lists.interest));
+      w.classList.toggle("tap-u", mark === "u");
       // "committed" = already submitted and unchanged since; dimmed so newly
       // added/changed marks stand out as the unsent ones.
       w.classList.toggle("tap-committed", mark !== undefined && submitted[lemma] === mark);

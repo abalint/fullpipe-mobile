@@ -16,6 +16,7 @@ import type {
   TapBatch,
   TranscriptDoc,
   ViewSegment,
+  TapMark,
 } from "./types";
 import { getSettings } from "./store";
 
@@ -107,7 +108,7 @@ export const api = {
   getWordList: (name: ListName) =>
     request<{ list: ListName; words: ListWord[] }>(`/lists/${name}`),
   // a mark made from a list review (no episode): "k" → known, "h" → ★
-  markListWord: (lemma: string, mark: "k" | "h") =>
+  markListWord: (lemma: string, mark: TapMark) =>
     request<{ lemma: string; mark: "k" | "h"; status: string | null; interest: boolean }>(
       "/lists/mark", { method: "POST", body: JSON.stringify({ lemma, mark }) }),
   // shelve a watched episode into the passive-listening collection (or pull

@@ -78,6 +78,11 @@ h2 { font-size: 1rem; color: var(--muted); margin: 28px 0 10px;
 .w.tap-h { background: var(--hl-int); outline: 1px solid var(--int); }
 .w.tap-h::after { content: "★"; font-size: .7em; color: var(--int);
                   vertical-align: super; }
+/* ✗ unknown: back to the unknown wash whatever the lists say — the word has
+   left the known set (paint.ts unknownFor) */
+.w.tap-u { background: var(--hl); outline: 1px solid var(--unk); }
+.w.tap-u::after { content: "✗"; font-size: .7em; color: var(--unk);
+                  vertical-align: super; }
 /* already submitted & unchanged — muted outline so newly added/changed marks
    (solid outline) read as the unsent ones */
 .w.tap-committed { outline-style: dashed; opacity: .8; }
@@ -504,6 +509,9 @@ details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: po
 .subs-overlay .w.tap-h { background: none; outline: none; color: #c58fff;
                          font-weight: 500; text-decoration: none; }
 .subs-overlay .w.tap-h::after { color: #c58fff; }
+.subs-overlay .w.tap-u { background: none; outline: none; color: #ffa040;
+                         font-weight: 500; text-decoration: none; }
+.subs-overlay .w.tap-u::after { color: #ffa040; }
 .subs-overlay ruby rt { color: #fff; font-weight: 500; }
 /* あ toggle hides furigana on the subtitle line only — the popup card always
    shows readings (looking a word up IS asking for its reading) */

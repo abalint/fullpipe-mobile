@@ -92,10 +92,12 @@ export function getTaps(episodeId: string): Record<string, TapMark> {
   return read(K.taps(episodeId), {});
 }
 
+/** The mark cycle: (none) → ✓ known → ★ interest → ✗ unknown → (none). */
 export function cycleTap(episodeId: string, lemma: string): TapMark | undefined {
   const taps = getTaps(episodeId);
   if (taps[lemma] === "k") taps[lemma] = "h";
-  else if (taps[lemma] === "h") delete taps[lemma];
+  else if (taps[lemma] === "h") taps[lemma] = "u";
+  else if (taps[lemma] === "u") delete taps[lemma];
   else taps[lemma] = "k";
   write(K.taps(episodeId), taps);
   // the journal follows the latest mark anywhere; cycling back to no mark
@@ -108,8 +110,10 @@ export function cycleTap(episodeId: string, lemma: string): TapMark | undefined 
 }
 
 // ---- global mark journal ------------------------------------------------------
-// Every ✓ / ★ made on this phone, by lemma, regardless of episode — the
-// latest mark wins. The per-episode tap stores above are cleared at close-out
+// Every ✓ / ★ / ✗ made on this phone, by lemma, regardless of episode — the
+// latest mark wins (paint.ts locallyMarked reads it ahead of the per-episode
+// stores for exactly that reason: a ✗ in tonight's show beats a stale ✓ in
+// an unfinished one). The per-episode tap stores above are cleared at close-out
 // (Mark watched, delete), but a ★ must keep painting purple in the next show
 // even when the phone is offline and the batch is still in the outbox, so the
 // paint layer (paint.ts locallyMarked) sweeps this too. Never cleared.

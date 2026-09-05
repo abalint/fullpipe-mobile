@@ -126,6 +126,9 @@ export interface TranscriptDoc {
 export interface PaintState {
   episode_id: string;
   known: string[];
+  /** Words ✗'d on the ledger and not since re-claimed: the one list that
+      SUBTRACTS from the sidecar's frozen token `k`. Absent from old states. */
+  unknown?: string[];
   confirm: string[];
   interest: string[];
   should_know?: string[]; // absent from old cached states
@@ -277,7 +280,11 @@ export type ListWord = ConfirmCandidate;
 
 /** "k" = I know this (ledger evidence) · "h" = high interest (card priority).
     Unknown needs no mark — candidates are presumed unknown. */
-export type TapMark = "k" | "h";
+/** ✓ known · ★ high interest · ✗ unknown ("I don't know this" — takes a word
+    the ledger / sidecar calls known back out of the known set; everything
+    else — blue if its exposures already qualify, green if it is frequent —
+    follows from that on the server). */
+export type TapMark = "k" | "h" | "u";
 
 /** One mark: [lemma, mark] for a word, [headword, mark, "phrase"] for a
     multi-word expression marked from the popup's phrase layer (the server

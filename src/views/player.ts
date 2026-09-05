@@ -35,10 +35,9 @@ import { createGlossPopup } from "../gloss-popup";
 import type { KeywordInfo } from "../gloss-popup";
 import { NO_CONFIRM } from "../lists";
 import {
-  applyKnown,
+  applyPaintKnown,
   fetchPaint,
   getCachedPaint,
-  knownFor,
   listClass,
   listsFor,
   NO_LISTS,
@@ -52,7 +51,7 @@ import type { ListSnapshot, PaintLists, PhraseLists } from "../paint";
 import { tokenSpan } from "../prep-render";
 import { epLabel, nextEpisode } from "../series";
 import { autoplayNext, cachePrep, getCachedJobs, getCachedPrep, getTaps, phraseTapKey } from "../store";
-import { scheduleTapSync } from "../livesync";
+import { onTapSync, scheduleTapSync } from "../livesync";
 import { ViewRecorder } from "../viewtime";
 import {
   clearPosition,
@@ -520,7 +519,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   let paint: PaintState | null = getCachedPaint(episodeId);
   const applyPaint = (doc: ListSnapshot) => {
     snapshot = doc;
-    applyKnown(cues, knownFor(paint));
+    applyPaintKnown(cues, paint);
     lists = listsFor(paint, doc);
     phraseLists = phraseListsFor(paint);
     grammarConfirm = new Set(paint?.grammar_confirm ?? []);
@@ -697,6 +696,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
         if (hl && (hl !== "hl-unk" || tier === "learn")) w.classList.add(hl);
         w.classList.toggle("tap-k", pmark === "k");
         w.classList.toggle("tap-h", pmark === "h");
+        w.classList.toggle("tap-u", pmark === "u");
         w.dataset.phrase = p.canonical;
         return;
       }
@@ -707,6 +707,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       }
       w.classList.toggle("tap-k", mark === "k");
       w.classList.toggle("tap-h", paintsInterest(mark, lemma, lists.interest));
+      w.classList.toggle("tap-u", mark === "u");
     });
   };
 
@@ -830,11 +831,19 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
         fallbackHighValue(getCachedPrep(episodeId));
         // then the live lists: what's become known / entered a list since
         // this sidecar was pulled — repaint if the server answers
-        void fetchPaint(episodeId).then((fresh) => {
-          if (!fresh || !root.isConnected) return;
-          paint = fresh;
-          applyPaint(snapshot);
-          repaintCue();
+        const livePaint = () =>
+          fetchPaint(episodeId).then((fresh) => {
+            if (!fresh || !root.isConnected) return;
+            paint = fresh;
+            applyPaint(snapshot);
+            repaintCue();
+          });
+        void livePaint();
+        // and again after each mark batch lands: the ledger re-judges on the
+        // spot (a ✗ can put a word straight onto blue / green), so the
+        // promotion shows in this sitting, not the next
+        onTapSync((ep, result) => {
+          if (ep === episodeId && result?.sent && root.isConnected) void livePaint();
         });
         if (!tokenized.curated || sidecarsOutdated(episodeId)) {
           // sidecar was downloaded pre-curation (no grammar/phrase notes, no

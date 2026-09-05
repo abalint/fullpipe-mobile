@@ -543,9 +543,13 @@ describe("playerView subtitle overlay", () => {
     cycleTap(EP, phraseTapKey("犬が"));
     dog.click(); // popup + repaint path
     root.querySelector<HTMLElement>(".gp-phrase .gp-mark")!.click(); // ✓ → ★
-    root.querySelector<HTMLElement>(".gp-phrase .gp-mark")!.click(); // ★ → clear
+    root.querySelector<HTMLElement>(".gp-phrase .gp-mark")!.click(); // ★ → ✗
+    expect(dog.classList.contains("hl-unk")).toBe(true); // ✗ on the phrase: unknown as a unit
+    expect(dog.classList.contains("tap-u")).toBe(true);
+    root.querySelector<HTMLElement>(".gp-phrase .gp-mark")!.click(); // ✗ → clear
     root.querySelector<HTMLElement>(".gp-phrase .gp-mark")!.click(); // → ✓
     expect(dog.classList.contains("hl-unk")).toBe(false);
+    expect(dog.classList.contains("tap-u")).toBe(false);
     expect(dog.classList.contains("tap-k")).toBe(true);
     expect(getTaps(EP)["犬"]).toBeUndefined(); // the word was never marked
     root.remove();

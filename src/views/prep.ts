@@ -5,7 +5,7 @@
 // close-out happens locally now, the server catches up at the next sync.
 
 import { api, ApiError } from "../api";
-import { applyKnown, fetchPaint, getCachedPaint, knownFor, listsFor } from "../paint";
+import { applyPaintKnown, fetchPaint, getCachedPaint, listsFor } from "../paint";
 import { renderPrep } from "../prep-render";
 import {
   cachePrep,
@@ -65,15 +65,19 @@ export function prepView(episodeId: string): HTMLElement {
     // live paint state (paint.ts): words the ledger now calls known lose
     // their unknown wash — the doc's token flags froze at coverage time —
     // and the global lists (blue / purple / green) take their current shape
+    await livePaint();
+  }
+
+  async function livePaint(): Promise<void> {
     const st = await fetchPaint(episodeId);
     if (!st || !current || !root.isConnected) return;
-    if (applyKnown(Object.values(current.sentences_by_idx), knownFor(st))) show(current);
+    if (applyPaintKnown(Object.values(current.sentences_by_idx), st)) show(current);
     else repaintMarks();
   }
 
   function show(doc: PrepDoc): void {
     current = doc;
-    applyKnown(Object.values(doc.sentences_by_idx), knownFor(getCachedPaint(episodeId)));
+    applyPaintKnown(Object.values(doc.sentences_by_idx), getCachedPaint(episodeId));
     root.querySelector(".prep")?.remove();
     root.querySelector(".submit-bar")?.remove();
 
@@ -185,10 +189,13 @@ export function prepView(episodeId: string): HTMLElement {
     if (pendingTapCount(episodeId)) scheduleTapSync(episodeId);
     // a sync landed (from this screen or the player): restyle the marks as
     // committed and update the line
-    onTapSync((ep) => {
+    onTapSync((ep, result) => {
       if (ep !== episodeId || !root.isConnected) return;
       refreshTaps();
       syncStatus();
+      // the ledger re-judged on arrival — pull the lists so a ✗ that
+      // dropped a word onto blue / green paints now
+      if (result?.sent) void livePaint();
     });
 
     // Step 2: after actually watching — activates exposures and pushes cards.
