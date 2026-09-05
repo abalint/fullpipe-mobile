@@ -45,7 +45,7 @@ import {
   paintsInterest,
   phraseClass,
   phraseListsFor,
-  phrasesAt,
+  phraseToPaint,
   NO_PHRASES,
 } from "../paint";
 import type { ListSnapshot, PaintLists, PhraseLists } from "../paint";
@@ -691,7 +691,9 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       // the PHRASE's colour across every token of it, at any tier but off,
       // so an unknown expression made of known words is still visible
       w.classList.remove(...PH_CLASSES);
-      const p = ti != null && tier !== "off" ? phrasesAt(c?.phrases, ti)[0] : undefined;
+      const p = ti != null && tier !== "off"
+        ? phraseToPaint(c?.phrases, c?.tokens, ti, episodeId, phraseLists)
+        : undefined;
       if (p) {
         w.classList.add("ph", phraseClass(p, taps[phraseTapKey(p.canonical)], phraseLists));
         if (ti === p.start) w.classList.add("ph-first");

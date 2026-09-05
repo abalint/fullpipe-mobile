@@ -10,7 +10,7 @@
 // Extracted from player.ts so the reader shows the exact same popup for the
 // same tap.
 
-import { compoundKeysAt } from "./compounds";
+import { compoundRunsAt } from "./compounds";
 import { inflectionAt } from "./inflection";
 import { NO_PHRASES, phrasesAt } from "./paint";
 import type { PhraseLists } from "./paint";
@@ -155,8 +155,24 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
     // Phrases the painter couldn't place (no span) stay foot notes below,
     // with their own mark, so every phrase on the line is still markable.
     const covering = ti != null ? phrasesAt(sentence?.phrases, ti) : [];
-    for (const p of covering) pop.appendChild(phraseLayer(p, defs));
     const inPhrase = new Set(covering.map((p) => p.canonical));
+    // compounds/expressions this token is part of (帝王切開, そういう,
+    // 百歩譲って) — the server pre-validated the runs as JMdict headwords
+    // (tools/jmdict.py compound_entries), which makes each one a phrase key
+    // in its own right (GRAMMAR.md), so it gets the same layer and mark
+    const lineTokens = sentence?.tokens ?? [];
+    for (const r of ti != null ? compoundRunsAt(lineTokens, ti) : []) {
+      if (r.key === lemma || !defs[r.key] || inPhrase.has(r.key)) continue;
+      if (covering.length >= 3) break; // a glance, not a dictionary page
+      inPhrase.add(r.key);
+      covering.push({
+        canonical: r.key,
+        surface: lineTokens.slice(r.start, r.end).map((t) => t.s).join(""),
+        start: r.start,
+        end: r.end,
+      });
+    }
+    for (const p of covering) pop.appendChild(phraseLayer(p, defs));
 
     // --- word layer
     const word = el("div", "gp-layer gp-word");
@@ -168,7 +184,6 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
     // how the tapped word is conjugated HERE — deterministic from the
     // token chain (inflection.ts), so it works on every line, not just
     // curated ones
-    const lineTokens = sentence?.tokens ?? [];
     const infl = ti != null ? inflectionAt(lineTokens, ti) : null;
     if (infl && (infl.parts.length > 1 || infl.surface !== infl.lemma)) {
       const row = el("div", "gp-inflect");
@@ -180,27 +195,6 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
         if (p.label) row.appendChild(el("span", "gp-part-label", `〔${p.label}〕`));
       });
       word.appendChild(row);
-    }
-    // compounds/expressions this token is part of (帝王切開, そういう) —
-    // the server pre-validated the runs; we just probe the joined keys. A
-    // run that IS the phrase above already has its own layer.
-    const compounds = (ti != null ? compoundKeysAt(lineTokens, ti) : [])
-      .filter((k) => k !== lemma && defs[k] && !inPhrase.has(k))
-      .slice(0, 2);
-    for (const key of compounds) {
-      const d = el("div", "gp-dict gp-compound");
-      d.appendChild(el("span", "gp-tag", "compound"));
-      d.appendChild(el("span", "gp-pattern", key));
-      const entry = defs[key][0];
-      if (entry.r[0] && entry.r[0] !== key)
-        d.appendChild(el("span", "gp-reading", ` ${entry.r[0]}`));
-      for (const sense of entry.s.slice(0, 2)) {
-        const line = el("div", "gp-sense");
-        if (sense.pos.length) line.appendChild(el("span", "gp-pos", sense.pos[0]));
-        line.appendChild(document.createTextNode(sense.g.slice(0, 4).join("; ")));
-        d.appendChild(line);
-      }
-      word.appendChild(d);
     }
     // the curate pass's own gloss/note/why lead — they're episode-specific
     if (info?.entry.gloss) word.appendChild(el("div", "gp-gloss", info.entry.gloss));
@@ -240,7 +234,7 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
       row.appendChild(markButton(phraseTapKey(p.canonical), lists.interest.has(p.canonical)));
       word.appendChild(row);
     }
-    if (!info && !entries.length && !infl && !compounds.length &&
+    if (!info && !entries.length && !infl && !covering.length &&
         !sentence?.grammar?.length && !sentence?.phrases?.length)
       word.appendChild(el("div", "gp-none", "no dictionary entry"));
     pop.appendChild(word);

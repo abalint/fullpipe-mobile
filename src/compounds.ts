@@ -20,12 +20,28 @@ import type { Token } from "./types";
 
 const MAX_RUN = 4; // server's COMPOUND_MAX_TOKENS
 
-/** Candidate compound keys for runs containing tokens[ti], longest run
-    first (so callers rendering the first hits show the widest match). */
-export function compoundKeysAt(tokens: Token[], ti: number): string[] {
+/** One candidate compound: its lookup key and the token run [start, end)
+    it spans — the span is what lets a marked compound paint as a phrase
+    unit (paint.ts) and open the popup's phrase layer. */
+export interface CompoundRun {
+  key: string;
+  start: number;
+  end: number;
+}
+
+/** Candidate compound runs containing tokens[ti], longest run first (so
+    callers rendering the first hits show the widest match); the surface
+    key precedes the dictionary-form key for the same run. */
+export function compoundRunsAt(tokens: Token[], ti: number): CompoundRun[] {
   const ok = (t: Token | undefined) => !!t?.l && !NO_LOOKUP.test(t.l);
   if (!ok(tokens[ti])) return [];
-  const keys: string[] = [];
+  const runs: CompoundRun[] = [];
+  const seen = new Set<string>();
+  const push = (key: string, start: number, end: number) => {
+    if (seen.has(key)) return;
+    seen.add(key);
+    runs.push({ key, start, end });
+  };
   for (let len = MAX_RUN; len >= 2; len--) {
     for (let i = ti - len + 1; i <= ti; i++) {
       if (i < 0 || i + len > tokens.length) continue;
@@ -37,9 +53,14 @@ export function compoundKeysAt(tokens: Token[], ti: number): string[] {
         .map((t) => t.s)
         .join("")
         .concat(run[len - 1].l!);
-      keys.push(surf);
-      if (stem !== surf) keys.push(stem);
+      push(surf, i, i + len);
+      if (stem !== surf) push(stem, i, i + len);
     }
   }
-  return [...new Set(keys)];
+  return runs;
+}
+
+/** Candidate compound keys for runs containing tokens[ti], longest run first. */
+export function compoundKeysAt(tokens: Token[], ti: number): string[] {
+  return compoundRunsAt(tokens, ti).map((r) => r.key);
 }

@@ -22,7 +22,8 @@
 
 import { api } from "./api";
 import { confirmList } from "./lists";
-import { getMarkJournal, isPhraseTapKey, phraseFromTapKey } from "./store";
+import { compoundRunsAt } from "./compounds";
+import { getMarkJournal, getTaps, isPhraseTapKey, phraseFromTapKey, phraseTapKey } from "./store";
 import type { PaintState, SentencePhrase, TapMark, Token, TranscriptDoc } from "./types";
 
 const key = (ep: string) => `fp.paint.${ep}`;
@@ -284,4 +285,29 @@ export function confirmFrom(
   doc: TranscriptDoc | null | undefined,
 ): ReadonlySet<string> {
   return state ? new Set(state.confirm) : confirmList(doc);
+}
+
+/** The phrase to paint under token `ti`: a curated/tracked phrase whose span
+    covers it, else a compound run (compounds.ts — a JMdict multi-token
+    headword the dictionary pass found) that the user has MARKED or the
+    ledger tracks. Unmarked compounds never paint: そういう / という on every
+    line would be noise, and the ledger only tracks what was deliberately
+    kept. Longest run wins. */
+export function phraseToPaint(
+  phrases: SentencePhrase[] | undefined,
+  tokens: Token[] | undefined,
+  ti: number,
+  episodeId: string,
+  lists: PhraseLists,
+): SentencePhrase | undefined {
+  const placed = phrasesAt(phrases, ti)[0];
+  if (placed) return placed;
+  if (!tokens) return undefined;
+  const taps = getTaps(episodeId);
+  for (const r of compoundRunsAt(tokens, ti)) {
+    if (taps[phraseTapKey(r.key)] || lists.known.has(r.key) ||
+        lists.confirm.has(r.key) || lists.interest.has(r.key))
+      return { canonical: r.key, start: r.start, end: r.end };
+  }
+  return undefined;
 }

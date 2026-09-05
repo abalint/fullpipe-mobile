@@ -22,6 +22,7 @@ const sentence = {
 };
 const defs: Definitions = {
   "血": [{ k: ["血"], r: ["ち"], s: [{ pos: ["noun"], g: ["blood"] }] }],
+  "バレー部": [{ k: ["バレー部"], r: ["バレーぶ"], s: [{ pos: ["noun"], g: ["volleyball club"] }] }],
   "血が騒ぐ": [{ k: ["血が騒ぐ"], r: ["ちがさわぐ"], s: [{ pos: ["expression"], g: ["to get excited"] }] }],
 };
 
@@ -57,16 +58,29 @@ describe("gloss popup phrase layer", () => {
 
   it("a tap outside the span gets only the word layer", () => {
     const pop = popup();
-    pop.show("バレー", 1, sentence);
+    pop.show("の", 3, sentence);
     expect(pop.el.querySelector(".gp-phrase")).toBeNull();
     expect(pop.el.querySelector(".gp-word .gp-head .gp-tag")).toBeNull(); // no "word" tag needed
     // both phrases are still reachable as line notes
     expect(pop.el.querySelectorAll(".gp-line-note").length).toBe(2);
   });
 
+  it("a dictionary compound the tap sits in is a phrase layer with its own mark", () => {
+    // バレー|部 → バレー部 is a JMdict headword the server served; no curate
+    // entry, yet it is a phrase key like any other (GRAMMAR.md)
+    const pop = popup();
+    pop.show("バレー", 1, sentence);
+    const layer = pop.el.querySelector<HTMLElement>(".gp-phrase")!;
+    expect(layer.dataset.phrase).toBe("バレー部");
+    expect(layer.textContent).toContain("volleyball club");
+    (layer.querySelector(".gp-mark") as HTMLButtonElement).click();
+    expect(getTaps("ep1")).toEqual({ [phraseTapKey("バレー部")]: "k" });
+    expect(pop.el.querySelector(".gp-compound")).toBeNull(); // the old read-only block is gone
+  });
+
   it("a phrase the painter couldn't place (no span) is still markable from its foot note", () => {
     const pop = popup();
-    pop.show("血", 4, { tokens, phrases: [{ canonical: "血が騒ぐ" }] });
+    pop.show("の", 3, { tokens, phrases: [{ canonical: "血が騒ぐ" }] });
     expect(pop.el.querySelector(".gp-phrase")).toBeNull(); // no layer without a span
     const note = pop.el.querySelector<HTMLElement>(".gp-line-phrase")!;
     (note.querySelector(".gp-mark") as HTMLButtonElement).click();

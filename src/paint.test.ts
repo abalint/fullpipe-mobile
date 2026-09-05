@@ -21,6 +21,7 @@ import {
   paintsInterest,
   phraseClass,
   phraseListsFor,
+  phraseToPaint,
   phrasesAt,
   sameLists,
   shouldKnowFor,
@@ -191,6 +192,21 @@ describe("phrase axis", () => {
     cycleTap("ep2", phraseTapKey("血が騒ぐ")); // ✓ in the next show
     expect(phraseListsFor(state()).interest.size).toBe(0);
     expect(phraseListsFor(state()).known).toEqual(new Set(["血が騒ぐ"]));
+  });
+
+  it("phraseToPaint: a placed phrase first; a compound only once marked or tracked", () => {
+    const tokens = [{ s: "元", l: "元" }, { s: "バレー", l: "バレー" }, { s: "部", l: "部" }];
+    const lists = phraseListsFor(null);
+    expect(phraseToPaint([p], tokens, 5, "ep1", lists)).toEqual(p);
+    // an unmarked compound (バレー部) paints nothing — no noise
+    expect(phraseToPaint([], tokens, 1, "ep1", lists)).toBeUndefined();
+    cycleTap("ep1", phraseTapKey("バレー部"));
+    expect(phraseToPaint([], tokens, 2, "ep1", lists))
+      .toEqual({ canonical: "バレー部", start: 1, end: 3 });
+    // tracked by the ledger (live paint state) counts the same
+    const live = phraseListsFor(state({ phrase_known: [], phrase_confirm: ["元バレー部"] }));
+    expect(phraseToPaint([], tokens, 0, "ep2", live))
+      .toEqual({ canonical: "元バレー部", start: 0, end: 3 });
   });
 
   it("phrasesAt covers the span; unplaced phrases only when asked", () => {
