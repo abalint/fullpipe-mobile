@@ -24,8 +24,9 @@ import type { Definitions, TranscriptDoc } from "./types";
        status (paint.ts phraseClass), /definitions serves the phrase headwords
        (the popup's phrase layer).
     6: /transcript also places the ledger's tracked phrases live (a compound
-       marked from the popup paints on the next open). */
-export const SIDECAR_FORMAT = 6;
+       marked from the popup paints on the next open).
+    7: one-token headwords (万が一) are no longer served as phrases. */
+export const SIDECAR_FORMAT = 7;
 
 export interface VideoRecord {
   path: string;
