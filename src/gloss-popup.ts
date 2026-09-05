@@ -11,6 +11,7 @@
 // same tap.
 
 import { compoundRunsAt } from "./compounds";
+import type { CompoundRun } from "./compounds";
 import { inflectionAt } from "./inflection";
 import { NO_PHRASES, phrasesAt } from "./paint";
 import type { PhraseLists } from "./paint";
@@ -80,6 +81,35 @@ function el(tag: string, cls?: string, text?: string): HTMLElement {
 
 const markLabel = (m: TapMark | undefined) =>
   m === "k" ? "known ✓" : m === "h" ? "interest ★" : m === "u" ? "unknown ✗" : "mark";
+
+/** The dictionary compounds a tap sits in, longest match wins: of the
+    served runs (keys the server validated — compounds.ts), a run nested
+    inside a wider served run or inside a curated phrase's span is the
+    same expression seen shorter (桃山時代 inside 安土桃山時代, 端から
+    inside 端から端まで) and is dropped; when a run's surface key and its
+    dictionary-form key are both served (歩き始め / 歩き始める), the
+    dictionary form is the word. Widest first, then left to right. */
+export function servedCompoundsAt(
+  tokens: Token[],
+  ti: number | undefined,
+  defs: Definitions,
+  covering: { start?: number | null; end?: number | null }[] = [],
+): CompoundRun[] {
+  if (ti == null) return [];
+  const spans = covering.filter((p) => p.start != null && p.end != null)
+    .map((p) => ({ start: p.start as number, end: p.end as number }));
+  const within = (r: CompoundRun, o: { start: number; end: number }) =>
+    o.start <= r.start && r.end <= o.end && o.end - o.start > r.end - r.start;
+  const kept: CompoundRun[] = [];
+  for (const r of compoundRunsAt(tokens, ti)) {
+    if (!defs[r.key]) continue;
+    if (spans.some((o) => within(r, o)) || kept.some((o) => within(r, o))) continue;
+    const twin = kept.findIndex((o) => o.start === r.start && o.end === r.end);
+    if (twin >= 0) kept[twin] = r; // surface key came first; the dictionary form replaces it
+    else kept.push(r);
+  }
+  return kept;
+}
 
 export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
   const pop = el("div", `gloss-pop${opts.extraClass ? ` ${opts.extraClass}` : ""}`);
@@ -161,8 +191,8 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
     // (tools/jmdict.py compound_entries), which makes each one a phrase key
     // in its own right (GRAMMAR.md), so it gets the same layer and mark
     const lineTokens = sentence?.tokens ?? [];
-    for (const r of ti != null ? compoundRunsAt(lineTokens, ti) : []) {
-      if (r.key === lemma || !defs[r.key] || inPhrase.has(r.key)) continue;
+    for (const r of servedCompoundsAt(lineTokens, ti, defs, covering)) {
+      if (r.key === lemma || inPhrase.has(r.key)) continue;
       if (covering.length >= 3) break; // a glance, not a dictionary page
       inPhrase.add(r.key);
       covering.push({

@@ -13,7 +13,10 @@
 // Key construction MUST stay in lockstep with the server: runs of 2..4
 // adjacent tokens that all have a lemma and pass NO_LOOKUP; per run, the
 // surface concat and surfaces+final-LEMMA (an inflected tail still finds
-// its dictionary form: 気を付けて → 気を付ける).
+// its dictionary form: 気を付けて → 気を付ける). WHICH keys are served is
+// the server's call alone (lexical units only — no particle-led grammar
+// patterns, no word+glue, no homophones); the popup shows the widest
+// served run covering the tap (gloss-popup.ts servedCompoundsAt).
 
 import { NO_LOOKUP } from "./prep-render";
 import type { Token } from "./types";

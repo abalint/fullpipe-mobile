@@ -78,6 +78,38 @@ describe("gloss popup phrase layer", () => {
     expect(pop.el.querySelector(".gp-compound")).toBeNull(); // the old read-only block is gone
   });
 
+  it("nested dictionary compounds collapse to the widest match, dictionary form over surface", () => {
+    // 安土|桃山|時代: the server served 安土桃山時代, 安土桃山 and 桃山時代 —
+    // one expression seen at three widths; a tap on 桃山 opens ONE layer.
+    // 歩き|始め(始める): surface key 歩き始め (noun) and dictionary-form key
+    // 歩き始める (verb) both served for the same span — the verb is the word.
+    const toks: Token[] = [
+      { s: "安土", l: "安土", c: 1 }, { s: "桃山", l: "桃山", c: 1 }, { s: "時代", l: "時代", c: 1 },
+      { s: "に", l: "に" }, { s: "歩き", l: "歩く", c: 1 }, { s: "始め", l: "始める", c: 1 },
+      { s: "た", l: "た" },
+    ];
+    const d: Definitions = {
+      "安土桃山時代": [{ k: ["安土桃山時代"], r: ["あづちももやまじだい"], s: [{ pos: ["noun"], g: ["Azuchi-Momoyama period"] }] }],
+      "安土桃山": [{ k: ["安土桃山"], r: ["あづちももやま"], s: [{ pos: ["noun"], g: ["Azuchi-Momoyama"] }] }],
+      "桃山時代": [{ k: ["桃山時代"], r: ["ももやまじだい"], s: [{ pos: ["noun"], g: ["Momoyama period"] }] }],
+      "歩き始め": [{ k: ["歩き始め"], r: ["あるきはじめ"], s: [{ pos: ["noun"], g: ["starting to walk"] }] }],
+      "歩き始める": [{ k: ["歩き始める"], r: ["あるきはじめる"], s: [{ pos: ["verb"], g: ["to begin to walk"] }] }],
+    };
+    const pop = createGlossPopup({ episodeId: "ep1", defs: () => d,
+      phrases: () => phraseListsFor(null) });
+    pop.show("桃山", 1, { tokens: toks });
+    let layers = [...pop.el.querySelectorAll<HTMLElement>(".gp-phrase")].map((e) => e.dataset.phrase);
+    expect(layers).toEqual(["安土桃山時代"]);
+    pop.show("始める", 5, { tokens: toks });
+    layers = [...pop.el.querySelectorAll<HTMLElement>(".gp-phrase")].map((e) => e.dataset.phrase);
+    expect(layers).toEqual(["歩き始める"]);
+    // a compound nested inside a curated phrase's span is that phrase, not a second layer
+    pop.show("桃山", 1, { tokens: toks, phrases: [
+      { canonical: "安土桃山時代", surface: "安土桃山時代", start: 0, end: 3, status: "unknown" as const }] });
+    layers = [...pop.el.querySelectorAll<HTMLElement>(".gp-phrase")].map((e) => e.dataset.phrase);
+    expect(layers).toEqual(["安土桃山時代"]);
+  });
+
   it("a phrase the painter couldn't place (no span) is still markable from its foot note", () => {
     const pop = popup();
     pop.show("の", 3, { tokens, phrases: [{ canonical: "血が騒ぐ" }] });

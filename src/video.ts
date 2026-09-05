@@ -25,8 +25,11 @@ import type { Definitions, TranscriptDoc } from "./types";
        (the popup's phrase layer).
     6: /transcript also places the ledger's tracked phrases live (a compound
        marked from the popup paints on the next open).
-    7: one-token headwords (万が一) are no longer served as phrases. */
-export const SIDECAR_FORMAT = 7;
+    7: one-token headwords (万が一) are no longer served as phrases.
+    8: /definitions serves lexical compounds only — particle-led grammar
+       patterns (に関して, という), word+glue (本当に) and homophones (し+ない
+       as 市内) are gone; a cached sidecar would keep showing them. */
+export const SIDECAR_FORMAT = 8;
 
 export interface VideoRecord {
   path: string;
