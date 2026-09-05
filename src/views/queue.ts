@@ -400,8 +400,6 @@ export function jobRow(
   const chip = el("span", `chip st-${state}`, state);
   sub.appendChild(chip);
   if (hasPendingActions(job.episode_id)) sub.appendChild(el("span", "chip pending", "⇪ pending sync"));
-  // flagged for a /debrief conversation on the PC — don't delete until done
-  if (job.debrief) sub.appendChild(el("span", "chip debrief", "🗣 debrief"));
   // /immerse's genre label (English, categorical) — set once curated
   if (job.genre) sub.appendChild(el("span", "chip genre", job.genre));
   if (job.duration) sub.appendChild(el("span", "muted", ` ${fmtDur(job.duration)}`));
@@ -462,27 +460,6 @@ export function jobRow(
       rerender();
     });
     actions.appendChild(shelve);
-  }
-  // queue the episode for a post-watch /debrief comprehension conversation
-  // (runs on the PC): flags it on the server so the skill picks it up, and
-  // blocks delete until the debrief has happened — the conversation needs
-  // the transcript, which delete would destroy. Tap again to unflag.
-  if (!offline && ["staged", "reconciled", "pushing", "watched"].includes(job.state)) {
-    const flag = el(
-      "button",
-      `small${job.debrief ? " on" : ""}`,
-      job.debrief ? "🗣 queued ✓" : "🗣 debrief",
-    ) as HTMLButtonElement;
-    flag.addEventListener("click", async () => {
-      flag.disabled = true;
-      try {
-        await api.setDebrief(job.episode_id, !job.debrief);
-      } catch (e) {
-        alert((e as Error).message);
-      }
-      rerender();
-    });
-    actions.appendChild(flag);
   }
   // the background card push failed — same retry the prep screen offers
   if (!offline && job.state === "watched" && job.error) {
@@ -641,11 +618,6 @@ export async function removeJob(job: Job, reload: () => void, offline = false): 
   }
   if (STAGE1.includes(job.state)) {
     alert(`Still ${job.state} — let Stage 1 finish or fail first, then delete.`);
-    return;
-  }
-  if (job.debrief) {
-    // mirrors the server's 409: the debrief conversation needs the transcript
-    alert("Queued for debrief 🗣 — the conversation needs this episode's transcript. Finish the debrief (or unflag it) first.");
     return;
   }
   if (!confirm(deleteMessage(job))) return;

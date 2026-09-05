@@ -174,8 +174,6 @@ export function passiveView(): HTMLElement {
     main.appendChild(el("div", "job-title", job.title || job.source || job.episode_id));
     const sub = el("div", "job-sub");
     sub.appendChild(el("span", "chip st-watched", "passive"));
-    // still queued for a /debrief conversation — delete stays blocked
-    if (job.debrief) sub.appendChild(el("span", "chip debrief", "🗣 debrief"));
     if (job.genre) sub.appendChild(el("span", "chip genre", job.genre));
     if (job.duration) sub.appendChild(el("span", "muted", ` ${fmtDur(job.duration)}`));
     if (!getVideoRecord(job.episode_id))
