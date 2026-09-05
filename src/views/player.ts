@@ -43,11 +43,16 @@ import {
   listsFor,
   NO_LISTS,
   paintsInterest,
+  phraseClass,
+  phraseListsFor,
+  phrasesAt,
+  NO_PHRASES,
 } from "../paint";
-import type { ListSnapshot, PaintLists } from "../paint";
+import type { ListSnapshot, PaintLists, PhraseLists } from "../paint";
 import { tokenSpan } from "../prep-render";
 import { epLabel, nextEpisode } from "../series";
-import { autoplayNext, cachePrep, getCachedJobs, getCachedPrep, getTaps } from "../store";
+import { autoplayNext, cachePrep, getCachedJobs, getCachedPrep, getTaps, phraseTapKey } from "../store";
+import { scheduleTapSync } from "../livesync";
 import { ViewRecorder } from "../viewtime";
 import {
   clearPosition,
@@ -488,7 +493,12 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     keywords: () => keywords,
     grammarConfirm: () => grammarConfirm,
     interest: () => lists.interest,
-    onMarkChanged: () => paintTaps(),
+    phrases: () => phraseLists,
+    // a watch-time mark syncs on its own (livesync.ts) — nothing to submit
+    onMarkChanged: () => {
+      paintTaps();
+      scheduleTapSync(episodeId);
+    },
   });
   stage.append(video, overlay, popup.el);
 
@@ -499,6 +509,9 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   // / green) — the live paint state's when we have one, else the
   // transcript's snapshot, plus this phone's own marks
   let lists: PaintLists = NO_LISTS;
+  // the phrase axis (paint.ts): each curated phrase span paints from its own
+  // state, never its tokens' — the words-known / phrase-unknown gap shows
+  let phraseLists: PhraseLists = NO_PHRASES;
   let snapshot: ListSnapshot = {};
   // curated line patterns in the grammar half of the confirm queue (line badge)
   let grammarConfirm: ReadonlySet<string> = NO_CONFIRM;
@@ -509,6 +522,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     snapshot = doc;
     applyKnown(cues, knownFor(paint));
     lists = listsFor(paint, doc);
+    phraseLists = phraseListsFor(paint);
     grammarConfirm = new Set(paint?.grammar_confirm ?? []);
   };
   const fallbackHighValue = (doc: PrepDoc | null) => {
@@ -653,16 +667,19 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       both), each word's highlight is re-derived, and the tap classes layered
       on top. Keeps the span elements, so an open popup stays anchored. */
   const HL_CLASSES = ["hl-know", "hl-int", "hl-sk", "kw", "hl-hv", "hl-target", "hl-unk"];
+  const PH_CLASSES = ["ph", "ph-known", "ph-know", "ph-int", "ph-unk", "ph-first", "ph-last"];
   const paintTaps = () => {
     const taps = getTaps(episodeId);
     lists = listsFor(paint, snapshot);
+    phraseLists = phraseListsFor(paint);
     const c = current >= 0 ? cues[current] : undefined;
     const tier = getSubTier();
     const target = c ? soleUnknown(c) : null;
     overlay.querySelectorAll<HTMLElement>(".w[data-lemma]").forEach((w) => {
       const lemma = w.dataset.lemma!;
       const mark = taps[lemma];
-      const t = w.dataset.ti != null ? c?.tokens?.[Number(w.dataset.ti)] : undefined;
+      const ti = w.dataset.ti != null ? Number(w.dataset.ti) : undefined;
+      const t = ti != null ? c?.tokens?.[ti] : undefined;
       if (t) {
         const hl = tokenHighlight(t, tier, keywords, highValue, target, c!.cls, lists);
         w.classList.remove(...HL_CLASSES);
@@ -670,6 +687,17 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       }
       w.classList.toggle("tap-k", mark === "k");
       w.classList.toggle("tap-h", paintsInterest(mark, lemma, lists.interest));
+      // the phrase span this token sits in (GRAMMAR.md) — an underline in
+      // the PHRASE's colour across every token of it, at any tier but off,
+      // so an unknown expression made of known words is still visible
+      w.classList.remove(...PH_CLASSES);
+      const p = ti != null && tier !== "off" ? phrasesAt(c?.phrases, ti)[0] : undefined;
+      if (p) {
+        w.classList.add("ph", phraseClass(p, taps[phraseTapKey(p.canonical)], phraseLists));
+        if (ti === p.start) w.classList.add("ph-first");
+        if (ti === p.end! - 1) w.classList.add("ph-last");
+        w.dataset.phrase = p.canonical;
+      } else delete w.dataset.phrase;
     });
   };
 

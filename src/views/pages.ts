@@ -6,6 +6,7 @@
 // readable.
 
 import { api, ApiError } from "../api";
+import { cancelTapSync } from "../livesync";
 import { deletePageFiles, getPageRecord, isPageSource } from "../pages";
 import {
   cacheJobs,
@@ -100,6 +101,7 @@ async function removePage(job: Job, reload: () => void, offline: boolean): Promi
   }
   const ep = job.episode_id;
   await deletePageFiles(ep).catch(() => {});
+  cancelTapSync(ep); // a debounce still running must not re-freeze the taps
   clearTaps(ep);
   clearSubmitted(ep);
   removeEpisodeActions(ep);

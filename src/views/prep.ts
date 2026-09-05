@@ -1,6 +1,7 @@
-// Prep screen: cache-first prep doc + tap capture + submit-to-outbox.
-// Submitting freezes taps into an idempotent batch and tries an immediate
-// flush; mark-watched goes the same way when the server is unreachable — the
+// Prep screen: cache-first prep doc + tap capture with live sync. Every
+// ✓ / ★ freezes (debounced, livesync.ts) into an idempotent outbox batch and
+// flushes on its own — there is no submit step; the bar only reports sync
+// state. Mark-watched goes the same way when the server is unreachable — the
 // close-out happens locally now, the server catches up at the next sync.
 
 import { api, ApiError } from "../api";
@@ -13,13 +14,14 @@ import {
   deleteCachedPrep,
   getCachedJobs,
   getCachedPrep,
+  getOutbox,
   getSubmitted,
+  getTaps,
   pendingTapCount,
   queuePassive,
   queueWatched,
-  submitTaps,
 } from "../store";
-import { flushOutbox } from "../sync";
+import { cancelTapSync, onTapSync, scheduleTapSync, syncTapsNow } from "../livesync";
 import { ratingBlock } from "./queue";
 import type { FollowState, PrepDoc } from "../types";
 
@@ -77,7 +79,6 @@ export function prepView(episodeId: string): HTMLElement {
 
     const title = el("h1", "", doc.episode.title || doc.episode.id);
     const bar = el("div", "submit-bar");
-    const submit = el("button", "primary grow", "Submit feedback") as HTMLButtonElement;
     const watchedBtn = el("button", "", "✓ Mark watched") as HTMLButtonElement;
     watchedBtn.title = "Mark watched — pushes the selected cards to Anki";
     const listenBtn = el("button", "", "🎧 + listen") as HTMLButtonElement;
@@ -85,12 +86,16 @@ export function prepView(episodeId: string): HTMLElement {
     const noCardsBtn = el("button", "", "No cards") as HTMLButtonElement;
     noCardsBtn.title = "Mark watched without pushing cards (disliked it)";
     const barStatus = el("div", "muted bar-status");
-    const watch = el("a", "btn", "▶ Watch") as HTMLAnchorElement;
+    // marks' sync state — its own line, so a sync landing never overwrites a
+    // "watched ✔ … rate it?" message and vice versa
+    const tapStatus = el("div", "muted bar-status tap-status");
+    const watch = el("a", "btn primary", "▶ Watch") as HTMLAnchorElement;
     watch.href = `#/player/${encodeURIComponent(episodeId)}`;
 
-    // Row 1 — pre-watch: play + the step-1 feedback submit.
+    // Row 1 — pre-watch: play. (Feedback used to be a button here; marks now
+    // sync live as you make them — see tapStatus.)
     const actionRow = el("div", "bar-row");
-    actionRow.append(watch, submit);
+    actionRow.append(watch);
 
     // Row 2 — the close-out trio; the caption carries the shared "this marks
     // it watched" semantics so the labels can stay short and equal-width.
@@ -139,17 +144,33 @@ export function prepView(episodeId: string): HTMLElement {
     // Row 3 — rating + tags.
     const metaRow = el("div", "bar-meta");
     metaRow.append(stars);
-    bar.append(metaRow, barStatus);
+    bar.append(metaRow, tapStatus, barStatus);
 
-    const updateSubmit = (pending: number) => {
-      submit.textContent = pending ? `Submit feedback (${pending})` : "Submit feedback";
+    // Where the marks stand against the server: debouncing → in the outbox
+    // (offline) → synced. Empty when nothing has been marked.
+    const syncStatus = () => {
+      const pending = pendingTapCount(episodeId);
+      const queued = getOutbox().some(
+        (a) => a.kind === "taps" && a.batch.episode_id === episodeId,
+      );
+      const marked = Object.keys(getTaps(episodeId)).length;
+      tapStatus.textContent = pending
+        ? `${pending} mark${pending > 1 ? "s" : ""} · syncing…`
+        : queued
+          ? `${marked} marked · queued — will sync when reachable`
+          : marked || Object.keys(getSubmitted(episodeId)).length
+            ? `${marked} marked · synced ✔`
+            : "";
     };
 
-    // renderPrep hands us its tap-repaint fn; we call it after a submit to
-    // re-style the marks as committed without rebuilding the whole doc.
+    // renderPrep hands us its tap-repaint fn; we call it after a sync lands
+    // to re-style the marks as committed without rebuilding the whole doc.
     let refreshTaps = () => {};
     const body = renderPrep(doc, {
-      onTapsChanged: updateSubmit,
+      onTapsChanged: (pending) => {
+        if (pending) scheduleTapSync(episodeId);
+        syncStatus();
+      },
       registerRefresh: (fn) => (refreshTaps = repaintMarks = fn),
       lists: () => listsFor(getCachedPaint(episodeId), null),
       // sentence timestamps jump into the in-app player at that moment
@@ -158,27 +179,16 @@ export function prepView(episodeId: string): HTMLElement {
     });
     body.insertBefore(title, body.firstChild);
     root.append(body, bar);
-    updateSubmit(pendingTapCount(episodeId));
-
-    // Remind you that this episode's feedback is already in — the marks below
-    // are what you sent, not a fresh slate.
-    const submittedCount = Object.keys(getSubmitted(episodeId)).length;
-    if (submittedCount && !pendingTapCount(episodeId))
-      barStatus.textContent = `feedback submitted ✔ · ${submittedCount} marked`;
-
-    // Step 1: feedback — known-taps hit the ledger, high-interest steers card
-    // selection. Cards are NOT pushed yet; that happens at Mark watched.
-    submit.addEventListener("click", async () => {
-      submit.disabled = true;
-      submitTaps(episodeId); // empty batch = "no corrections, default selection"
-      const res = await flushOutbox();
-      barStatus.textContent = res.remaining
-        ? `queued (outbox: ${res.remaining} pending — will sync when reachable)`
-        : "feedback synced ✔ — watch, then Mark watched";
-      // Keep the marks visible (now baseline-styled as committed) instead of
-      // wiping them; the button falls to 0 because nothing is unsent anymore.
+    syncStatus();
+    // marks made here before the doc reopened (or in the player) and still
+    // waiting on their debounce/flush: send them
+    if (pendingTapCount(episodeId)) scheduleTapSync(episodeId);
+    // a sync landed (from this screen or the player): restyle the marks as
+    // committed and update the line
+    onTapSync((ep) => {
+      if (ep !== episodeId || !root.isConnected) return;
       refreshTaps();
-      submit.disabled = false;
+      syncStatus();
     });
 
     // Step 2: after actually watching — activates exposures and pushes cards.
@@ -192,8 +202,10 @@ export function prepView(episodeId: string): HTMLElement {
     // rate-while-fresh auto-return, shared by the online and offline close-outs.
     const localCloseOut = async () => {
       deleteCachedPrep(episodeId); // light cleanup; the on-disk video + sidecars stay
+      cancelTapSync(episodeId); // a late debounce must not re-freeze cleared taps
       clearTaps(episodeId);
       clearSubmitted(episodeId);
+      tapStatus.textContent = "";
       // rate + tag while the impression is fresh; touching the rating cancels
       // the auto-return so there's time to pick tags (else the queue row keeps
       // the control). Reset here so only a *post-watch* touch counts.
@@ -217,6 +229,9 @@ export function prepView(episodeId: string): HTMLElement {
         noCardsBtn.disabled = false;
       };
       try {
+        // any mark still debouncing goes first — on the wire when online,
+        // ahead of the watched action in the outbox (FIFO) when not
+        await syncTapsNow(episodeId);
         const res = await api.markWatched(episodeId, pushCards);
         const c = res.cards;
         if (c?.error) {

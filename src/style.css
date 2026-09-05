@@ -99,7 +99,7 @@ button, .btn {
   background: var(--card); color: var(--fg); padding: 10px 16px;
   cursor: pointer; text-decoration: none; display: inline-block;
 }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:disabled { opacity: .5; }
 button.small, .btn.small { padding: 5px 10px; font-size: .8rem; border-radius: 8px; }
 h2 button { margin-left: 8px; vertical-align: middle; padding: 4px 10px;
@@ -284,6 +284,13 @@ button.small.on { border-color: var(--accent); color: var(--accent); }
 .bar-meta > :first-child { flex: 1; min-width: 0; }
 .bar-status { font-size: .85rem; }
 .bar-status:empty { display: none; }
+/* live mark sync — marks send themselves (livesync.ts); these just narrate */
+.tap-status { font-variant-numeric: tabular-nums; }
+.reader-toolbar .sync-state {
+  align-self: center; font-size: .78rem; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.reader-toolbar .sync-state:empty { display: none; }
 
 /* --- Progress / Stats tab ----------------------------------------------------
    Headline tiles over frequency-band coverage bars. Ledger-sourced, so it
@@ -317,6 +324,11 @@ button.small.on { border-color: var(--accent); color: var(--accent); }
 }
 .confirm-banner .cb-text { flex: 1; color: var(--fg); font-weight: 600; }
 .confirm-banner .cb-go { color: var(--accent); font-size: .85rem; white-space: nowrap; }
+/* the other two lists' banners take their list's paint hue (LIVE_REVIEW.md §6:
+   ★ violet, should-know green) so the Progress tab reads like the subtitles */
+.confirm-banner.cb-interest { --accent: #b07ff0; }
+.confirm-banner.cb-should { --accent: #3fb46a; }
+.confirm-banner + .confirm-banner { margin-top: -6px; }
 
 /* one card in the confirm queue */
 .confirm-card { background: var(--card); border-radius: 12px; padding: 12px 14px;
@@ -330,6 +342,9 @@ button.small.on { border-color: var(--accent); color: var(--accent); }
 .confirm-card .cc-badge { color: var(--accent); border: 1px solid var(--accent);
                           border-radius: 6px; padding: 0 6px; font-size: .72rem;
                           white-space: nowrap; align-self: center; }
+/* corpus rank on a word card — why it's on the should-know list */
+.confirm-card .cc-rank { color: var(--muted); font-size: .72rem; white-space: nowrap;
+                         align-self: center; }
 .confirm-card .cc-gloss { color: var(--fg); font-size: .9rem; margin-top: 4px; }
 .confirm-card .cc-eps { color: var(--muted); font-size: .76rem; margin-top: 3px;
                         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -468,6 +483,14 @@ details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: po
 .subs-overlay .w.hl-know { background: none; color: #6fd0ff; }  /* blue: think you know */
 .subs-overlay .w.hl-int { background: none; color: #c58fff; }   /* purple: high interest */
 .subs-overlay .w.hl-sk { background: none; color: #7ee787; }    /* green: should know */
+/* phrase spans (paint.ts phraseClass): an underline in the PHRASE's own
+   colour across all its tokens — a second axis under the word colours, so
+   血が騒いだ reads as one unit even when 血 / 騒ぐ are both known */
+.subs-overlay .w.ph { padding-bottom: 1px; border-bottom: 2px solid transparent; }
+.subs-overlay .w.ph-unk { border-bottom-color: #ffa040; border-bottom-style: dashed; }
+.subs-overlay .w.ph-know { border-bottom-color: #6fd0ff; }
+.subs-overlay .w.ph-int { border-bottom-color: #c58fff; }
+.subs-overlay .w.ph-known { border-bottom-color: transparent; }
 /* grammar-point-awaiting-confirm line marker: same blue as a think-you-know
    word, same badge shape as +1 */
 .subs-overlay .know-badge {
@@ -508,6 +531,12 @@ details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: po
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* two layers, phrase over word (gloss-popup.ts): the expression the tap sits
+   inside is its own item with its own mark — the rule between them says so */
+.gloss-pop .gp-layer + .gp-layer { margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid #444; }
+.gloss-pop .gp-phrase { border-left: 2px solid #c9a7ff; padding-left: 8px; }
+.gloss-pop .gp-head .gp-tag { margin-right: 0; }
 .gloss-pop .gp-head { display: flex; align-items: center; gap: 10px;
                       font-size: 1.15rem; font-weight: 600; }
 .gloss-pop .gp-head ruby rt { color: #bbb; }
@@ -529,6 +558,7 @@ details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: po
 .gloss-pop .gp-sense { color: #e8e8e8; }
 .gloss-pop .gp-none { color: #999; font-style: italic; }
 /* the line's curated grammar/phrase context ("grammar?" = proposed pattern) */
+.gloss-pop .gp-line-phrase { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .gloss-pop .gp-line-note { color: #cfcfcf; font-size: .88rem; margin-top: 4px;
                            border-top: 1px solid #333; padding-top: 4px; }
 .gloss-pop .gp-tag { color: #c9a7ff; font-size: .72rem; margin-right: 6px;

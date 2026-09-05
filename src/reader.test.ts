@@ -35,6 +35,7 @@ vi.mock("@capacitor/filesystem", () => ({
 import { downloadPage, deletePageFiles, getPageRecord, isPageSource } from "./pages";
 import { readerView } from "./views/reader";
 import { getOutbox, getTaps, saveSettings } from "./store";
+import { TAP_SYNC_DELAY_MS } from "./livesync";
 import type { PageDoc, TranscriptDoc } from "./types";
 
 const EP = "page_5ch_newsplus_1787045314";
@@ -200,16 +201,26 @@ describe("readerView", () => {
     expect(view.classList.contains("no-ruby")).toBe(false);
   });
 
-  it("submit freezes taps into the outbox; finished queues watched without cards", async () => {
+  it("a mark syncs on its own (debounced) — no submit button; finished queues watched without cards", async () => {
     const view = await mountReader();
+    expect(
+      [...view.querySelectorAll<HTMLButtonElement>(".reader-toolbar button")].some((b) =>
+        b.textContent?.startsWith("⇪"),
+      ),
+    ).toBe(false);
+    vi.useFakeTimers();
     (view.querySelector('.w[data-lemma="犬"]') as HTMLElement).click();
     (view.querySelector(".gp-mark") as HTMLElement).click();
-    [...view.querySelectorAll<HTMLButtonElement>(".reader-toolbar button")]
-      .find((b) => b.textContent?.startsWith("⇪"))!
-      .click();
+    const state = view.querySelector(".reader-toolbar .sync-state")!;
+    expect(state.textContent).toBe("⇪ 1…"); // debouncing
+    expect(getOutbox().length).toBe(0); // not frozen yet
+    await vi.advanceTimersByTimeAsync(TAP_SYNC_DELAY_MS + 10);
+    vi.useRealTimers();
     await tick();
     let outbox = getOutbox();
     expect(outbox.some((a) => a.kind === "taps" && a.batch.taps.length === 1)).toBe(true);
+    // the flush failed (offline stub) → the batch waits; the marks read as queued
+    expect(state.textContent).toBe("⇪ queued");
 
     const done = [...view.querySelectorAll<HTMLButtonElement>(".reader-toolbar button")].find(
       (b) => b.textContent?.startsWith("✓"),

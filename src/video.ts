@@ -19,8 +19,11 @@ import type { Definitions, TranscriptDoc } from "./types";
     2: /definitions serves every lemma (any-word popup) + repair-gate names.
     3: /definitions adds compound keys (帝王切開, そういう — compounds.ts).
     4: /transcript carries `confirm`, the think-you-know queue for this
-       episode (lists.ts) — without a re-pull an old sidecar never goes blue. */
-export const SIDECAR_FORMAT = 4;
+       episode (lists.ts) — without a re-pull an old sidecar never goes blue.
+    5: phrases as units — /transcript phrases carry their token span + ledger
+       status (paint.ts phraseClass), /definitions serves the phrase headwords
+       (the popup's phrase layer). */
+export const SIDECAR_FORMAT = 5;
 
 export interface VideoRecord {
   path: string;

@@ -1,13 +1,21 @@
 // The any-word gloss popup, shared by the player's subtitle overlay and the
-// page reader. One card: word + reading, the mark cycle (marks land in the
-// shared tap store), inflection breakdown, compound hits, curated gloss/notes,
-// JMdict senses, and the line's curated grammar/phrase context. Extracted
-// from player.ts so the reader shows the exact same popup for the same tap.
+// page reader. One card in two layers: the PHRASE layer first, when the
+// tapped token sits inside a multi-word expression (血が騒いだ — GRAMMAR.md:
+// its own ledger item, with its own mark, reading and JMdict senses), then
+// the WORD layer — word + reading, the mark cycle (marks land in the shared
+// tap store), inflection breakdown, compound hits, curated gloss/notes,
+// JMdict senses — and the line's other curated grammar/phrase context at the
+// foot. The two marks are independent: every word in 血が騒ぐ can be known
+// while the phrase itself is not, and the card makes that gap visible.
+// Extracted from player.ts so the reader shows the exact same popup for the
+// same tap.
 
 import { compoundKeysAt } from "./compounds";
 import { inflectionAt } from "./inflection";
+import { NO_PHRASES, phrasesAt } from "./paint";
+import type { PhraseLists } from "./paint";
 import { rubyWord, segsNode } from "./prep-render";
-import { cycleTap, getTaps } from "./store";
+import { cycleTap, getTaps, phraseTapKey } from "./store";
 import type {
   Definitions,
   GlossEntry,
@@ -41,6 +49,9 @@ export interface GlossPopupOptions {
   /** The standing high-interest set (paint.ts interestFor) — a word starred
       in another episode shows "interest ★" here too; the next tap is ✓. */
   interest?: () => ReadonlySet<string>;
+  /** The phrase axis (paint.ts phraseListsFor) — a phrase starred or in the
+      think-you-know queue shows as such in its layer. */
+  phrases?: () => PhraseLists;
   episodeId: string;
   /** Live getters — defs/keywords load async and refresh after the popup is
       built, so the popup reads them at show() time, never at create() time. */
@@ -75,23 +86,85 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
   pop.style.display = "none";
   pop.addEventListener("click", (e) => e.stopPropagation()); // reading ≠ dismiss
 
+  /** The mark button for one item — a word (key = lemma) or a phrase (key =
+      store.ts phraseTapKey). `standing` is the ledger's ★ when the phone has
+      no mark of its own, so the label reads "interest ★" and the next tap
+      is the ✓ that graduates it. */
+  const markButton = (key: string, standing: boolean): HTMLButtonElement => {
+    const local = getTaps(opts.episodeId)[key];
+    const shown = local === undefined && standing ? "h" : local;
+    const mark = el("button", "gp-mark", markLabel(shown)) as HTMLButtonElement;
+    mark.addEventListener("click", (e) => {
+      e.stopPropagation();
+      mark.textContent = markLabel(cycleTap(opts.episodeId, key));
+      opts.onMarkChanged?.();
+    });
+    return mark;
+  };
+
+  /** Dictionary senses for one key (capped — this is a glance, not a
+      dictionary page). `skipFirstReading`: the head already shows it. */
+  const senses = (defs: Definitions, key: string, max: number): HTMLElement[] => {
+    const entries = defs[key] ?? [];
+    return entries.slice(0, max).map((entry) => {
+      const d = el("div", "gp-dict");
+      // curate-authored definition (word JMdict lacks) — label the source
+      if (entry.ai) d.appendChild(el("span", "gp-tag", "curated"));
+      // header already shows the first entry's reading
+      if (entry !== entries[0]) d.appendChild(el("span", "gp-reading", entry.r[0] ?? ""));
+      for (const sense of entry.s.slice(0, 3)) {
+        const line = el("div", "gp-sense");
+        if (sense.pos.length) line.appendChild(el("span", "gp-pos", sense.pos[0]));
+        line.appendChild(document.createTextNode(sense.g.slice(0, 4).join("; ")));
+        d.appendChild(line);
+      }
+      return d;
+    });
+  };
+
+  /** The phrase layer: the expression as its own item — head (tag, ruby
+      headword, its own mark), how it surfaces on this line, its senses. */
+  const phraseLayer = (p: SentencePhrase, defs: Definitions): HTMLElement => {
+    const layer = el("div", "gp-layer gp-phrase");
+    layer.dataset.phrase = p.canonical;
+    const head = el("div", "gp-head");
+    head.appendChild(el("span", "gp-tag", "phrase"));
+    head.appendChild(rubyWord(p.canonical, defs[p.canonical]?.[0]?.r[0]));
+    const lists = opts.phrases?.() ?? NO_PHRASES;
+    head.appendChild(markButton(phraseTapKey(p.canonical), lists.interest.has(p.canonical)));
+    layer.appendChild(head);
+    if (p.surface && p.surface !== p.canonical) {
+      const row = el("div", "gp-inflect");
+      row.appendChild(el("span", "gp-surface", p.surface));
+      row.appendChild(document.createTextNode(" ＝ "));
+      row.appendChild(el("span", "gp-part", p.canonical));
+      layer.appendChild(row);
+    }
+    const dict = senses(defs, p.canonical, 2);
+    if (dict.length) layer.append(...dict);
+    else layer.appendChild(el("div", "gp-none", "no dictionary entry"));
+    return layer;
+  };
+
   const show = (lemma: string, ti?: number, sentence?: PopupSentence) => {
     const info = opts.keywords?.().get(lemma);
     const defs = opts.defs();
     const entries = defs[lemma] ?? [];
     pop.textContent = "";
+    // --- phrase layer(s): the expression the tapped token sits inside.
+    // Phrases the painter couldn't place (no span) stay foot notes below,
+    // with their own mark, so every phrase on the line is still markable.
+    const covering = ti != null ? phrasesAt(sentence?.phrases, ti) : [];
+    for (const p of covering) pop.appendChild(phraseLayer(p, defs));
+    const inPhrase = new Set(covering.map((p) => p.canonical));
+
+    // --- word layer
+    const word = el("div", "gp-layer gp-word");
     const head = el("div", "gp-head");
+    if (covering.length) head.appendChild(el("span", "gp-tag", "word"));
     head.appendChild(rubyWord(lemma, info?.entry.reading ?? entries[0]?.r[0]));
-    const local = getTaps(opts.episodeId)[lemma];
-    const standing = local === undefined && opts.interest?.().has(lemma) ? "h" : local;
-    const mark = el("button", "gp-mark", markLabel(standing)) as HTMLButtonElement;
-    mark.addEventListener("click", (e) => {
-      e.stopPropagation();
-      mark.textContent = markLabel(cycleTap(opts.episodeId, lemma));
-      opts.onMarkChanged?.();
-    });
-    head.appendChild(mark);
-    pop.appendChild(head);
+    head.appendChild(markButton(lemma, !!opts.interest?.().has(lemma)));
+    word.appendChild(head);
     // how the tapped word is conjugated HERE — deterministic from the
     // token chain (inflection.ts), so it works on every line, not just
     // curated ones
@@ -106,12 +179,13 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
         row.appendChild(el("span", "gp-part", p.text));
         if (p.label) row.appendChild(el("span", "gp-part-label", `〔${p.label}〕`));
       });
-      pop.appendChild(row);
+      word.appendChild(row);
     }
     // compounds/expressions this token is part of (帝王切開, そういう) —
-    // the server pre-validated the runs; we just probe the joined keys
+    // the server pre-validated the runs; we just probe the joined keys. A
+    // run that IS the phrase above already has its own layer.
     const compounds = (ti != null ? compoundKeysAt(lineTokens, ti) : [])
-      .filter((k) => k !== lemma && defs[k])
+      .filter((k) => k !== lemma && defs[k] && !inPhrase.has(k))
       .slice(0, 2);
     for (const key of compounds) {
       const d = el("div", "gp-dict gp-compound");
@@ -126,37 +200,25 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
         line.appendChild(document.createTextNode(sense.g.slice(0, 4).join("; ")));
         d.appendChild(line);
       }
-      pop.appendChild(d);
+      word.appendChild(d);
     }
     // the curate pass's own gloss/note/why lead — they're episode-specific
-    if (info?.entry.gloss) pop.appendChild(el("div", "gp-gloss", info.entry.gloss));
+    if (info?.entry.gloss) word.appendChild(el("div", "gp-gloss", info.entry.gloss));
     if (info?.entry.note_segs?.length) {
       const note = el("div", "gp-note");
       note.appendChild(segsNode(info.entry.note_segs));
-      pop.appendChild(note);
+      word.appendChild(note);
     }
     if (info?.why?.length) {
       const why = el("div", "gp-why");
       why.appendChild(segsNode(info.why));
-      pop.appendChild(why);
+      word.appendChild(why);
     }
-    // dictionary senses (capped — this is a glance, not a dictionary page)
-    for (const entry of entries.slice(0, 2)) {
-      const d = el("div", "gp-dict");
-      // curate-authored definition (word JMdict lacks) — label the source
-      if (entry.ai) d.appendChild(el("span", "gp-tag", "curated"));
-      // header already shows the first entry's reading
-      if (entry !== entries[0]) d.appendChild(el("span", "gp-reading", entry.r[0] ?? ""));
-      for (const sense of entry.s.slice(0, 3)) {
-        const line = el("div", "gp-sense");
-        if (sense.pos.length) line.appendChild(el("span", "gp-pos", sense.pos[0]));
-        line.appendChild(document.createTextNode(sense.g.slice(0, 4).join("; ")));
-        d.appendChild(line);
-      }
-      pop.appendChild(d);
-    }
-    // the line's curated grammar patterns + phrases (GRAMMAR.md) — they
-    // belong to the sentence, not one token, so any word tap surfaces them
+    // dictionary senses
+    word.append(...senses(defs, lemma, 2));
+    // the line's curated grammar patterns + the phrases the tap is NOT
+    // inside (GRAMMAR.md) — they belong to the sentence, not one token, so
+    // any word tap surfaces them
     for (const g of sentence?.grammar ?? []) {
       const row = el("div", "gp-line-note");
       row.appendChild(el("span", "gp-tag", g.proposed ? "grammar?" : "grammar"));
@@ -165,19 +227,23 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
       row.appendChild(el("span", `gp-pattern${ask ? " know" : ""}`, g.pattern));
       if (ask) row.appendChild(el("span", "gp-ask", " · think you know this?"));
       if (g.note) row.appendChild(document.createTextNode(` — ${g.note}`));
-      pop.appendChild(row);
+      word.appendChild(row);
     }
     for (const p of sentence?.phrases ?? []) {
-      const row = el("div", "gp-line-note");
+      if (inPhrase.has(p.canonical)) continue;
+      const row = el("div", "gp-line-note gp-line-phrase");
       row.appendChild(el("span", "gp-tag", "phrase"));
       row.appendChild(el("span", "gp-pattern", p.canonical));
       if (p.surface && p.surface !== p.canonical)
         row.appendChild(document.createTextNode(` — here: ${p.surface}`));
-      pop.appendChild(row);
+      const lists = opts.phrases?.() ?? NO_PHRASES;
+      row.appendChild(markButton(phraseTapKey(p.canonical), lists.interest.has(p.canonical)));
+      word.appendChild(row);
     }
     if (!info && !entries.length && !infl && !compounds.length &&
         !sentence?.grammar?.length && !sentence?.phrases?.length)
-      pop.appendChild(el("div", "gp-none", "no dictionary entry"));
+      word.appendChild(el("div", "gp-none", "no dictionary entry"));
+    pop.appendChild(word);
     pop.style.display = "";
     pop.scrollTop = 0; // the card scrolls when clamped — don't inherit the last word's position
   };

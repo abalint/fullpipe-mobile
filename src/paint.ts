@@ -22,8 +22,8 @@
 
 import { api } from "./api";
 import { confirmList } from "./lists";
-import { getMarkJournal } from "./store";
-import type { PaintState, TapMark, Token, TranscriptDoc } from "./types";
+import { getMarkJournal, isPhraseTapKey, phraseFromTapKey } from "./store";
+import type { PaintState, SentencePhrase, TapMark, Token, TranscriptDoc } from "./types";
 
 const key = (ep: string) => `fp.paint.${ep}`;
 
@@ -56,15 +56,21 @@ export async function fetchPaint(ep: string): Promise<PaintState | null> {
     (store.ts, survives close-out) or any episode's live tap store — so a
     mark made in one show counts everywhere at once, before it has even
     synced. */
-function locallyMarked(mark: TapMark): Set<string> {
+function locallyMarked(mark: TapMark, phrases = false): Set<string> {
   const out = new Set<string>();
-  for (const [lemma, m] of Object.entries(getMarkJournal())) if (m === mark) out.add(lemma);
+  // word marks and phrase marks share the stores but never the paint: a
+  // phrase key ("p:" + headword, store.ts) only ever paints its span
+  const take = (key: string, m: string) => {
+    if (m !== mark || isPhraseTapKey(key) !== phrases) return;
+    out.add(phrases ? phraseFromTapKey(key) : key);
+  };
+  for (const [key, m] of Object.entries(getMarkJournal())) take(key, m);
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i)!;
     if (!k.startsWith("fp.taps.")) continue;
     try {
       const taps = JSON.parse(localStorage.getItem(k) || "{}") as Record<string, string>;
-      for (const [lemma, m] of Object.entries(taps)) if (m === mark) out.add(lemma);
+      for (const [key, m] of Object.entries(taps)) take(key, m);
     } catch {
       /* a corrupt entry paints nothing */
     }
@@ -80,6 +86,82 @@ export function locallyKnown(): Set<string> {
 /** Every lemma currently starred (★) in any episode's tap store. */
 export function locallyInterest(): Set<string> {
   return locallyMarked("h");
+}
+
+// ---- phrases: the second axis ---------------------------------------------------
+// A phrase (GRAMMAR.md) is its own ledger item: 血が騒ぐ can be unknown while
+// 血 / が / 騒ぐ are all known, and that gap is invisible in a word-level
+// paint. So each phrase span paints from its OWN state — a local mark on the
+// phrase, else the live paint state's phrase lists, else the sidecar's
+// status snapshot — never from its tokens'.
+
+export interface PhraseLists {
+  known: ReadonlySet<string>;
+  confirm: ReadonlySet<string>;
+  interest: ReadonlySet<string>;
+  /** The live state carried a phrase axis — its `known` is then the truth
+      and the sidecar's status snapshot is ignored. */
+  live: boolean;
+}
+
+export const NO_PHRASES: PhraseLists = {
+  known: new Set(),
+  confirm: new Set(),
+  interest: new Set(),
+  live: false,
+};
+
+/** Phrase paint lists: the server's (when the paint state has the phrase
+    axis) plus this phone's own phrase marks; a ✓ retires a ★, and a
+    graduation to blue or known ends a stale local ★. */
+export function phraseListsFor(state: PaintState | null): PhraseLists {
+  const known = locallyMarked("k", true);
+  for (const p of state?.phrase_known ?? []) known.add(p);
+  const confirm = new Set(state?.phrase_confirm ?? []);
+  const interest = locallyMarked("h", true);
+  for (const p of state?.phrase_interest ?? []) interest.add(p);
+  for (const p of known) interest.delete(p);
+  for (const p of confirm) interest.delete(p);
+  return { known, confirm, interest, live: state?.phrase_known != null };
+}
+
+export function samePhraseLists(a: PhraseLists, b: PhraseLists): boolean {
+  const same = (x: ReadonlySet<string>, y: ReadonlySet<string>) =>
+    x.size === y.size && [...x].every((l) => y.has(l));
+  return same(a.known, b.known) && same(a.confirm, b.confirm) &&
+    same(a.interest, b.interest) && a.live === b.live;
+}
+
+/** How a phrase span paints: ph-known (no colour — known is the absence of
+    paint, as for words), ph-know (blue, think you know), ph-int (purple ★),
+    ph-unk (orange, you don't know it as a unit). `mark` is the phone's own
+    mark on the phrase; a ✓ wins, then a ★, then the ledger. */
+export function phraseClass(
+  p: SentencePhrase,
+  mark: TapMark | undefined,
+  lists: PhraseLists,
+): "ph-known" | "ph-know" | "ph-int" | "ph-unk" {
+  if (mark === "k") return "ph-known";
+  if (mark === "h") return "ph-int";
+  if (lists.known.has(p.canonical)) return "ph-known";
+  if (lists.confirm.has(p.canonical)) return "ph-know";
+  if (lists.interest.has(p.canonical)) return "ph-int";
+  if (!lists.live && p.status === "known") return "ph-known";
+  return "ph-unk";
+}
+
+/** The phrases whose token span covers token `ti`. Phrases the server could
+    not place (no span — old sidecars, or a surface the tokens don't spell)
+    are included only when `unplaced` is set: the popup still offers them
+    from any word on the line, the painter has nothing to underline. */
+export function phrasesAt(
+  phrases: SentencePhrase[] | undefined,
+  ti: number,
+  unplaced = false,
+): SentencePhrase[] {
+  return (phrases ?? []).filter((p) =>
+    p.start != null && p.end != null ? ti >= p.start && ti < p.end : unplaced,
+  );
 }
 
 /** Snapshot lists a transcript sidecar carries (absent on old sidecars). */

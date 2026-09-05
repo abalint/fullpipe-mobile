@@ -39,18 +39,35 @@ function pct(known: number, total: number): number {
   return total > 0 ? Math.round((known / total) * 100) : 0;
 }
 
+/** One "N things → Review" link into a word-list view. */
+function listBanner(href: string, cls: string, text: string): HTMLAnchorElement {
+  const banner = el("a", `confirm-banner ${cls}`) as HTMLAnchorElement;
+  banner.href = href;
+  banner.appendChild(el("span", "cb-text", text));
+  banner.appendChild(el("span", "cb-go", "Review →"));
+  return banner;
+}
+
 function renderStats(bannerBox: HTMLElement, root: HTMLElement, s: Stats): void {
-  // confirm banner: items (words + phrases + grammar) awaiting a "do you
-  // know this?" — the count is the all-kinds total from the server. It
-  // paints into its own slot above the time log so it stays first.
+  // the three global word lists (LIVE_REVIEW.md §1), each a link to its
+  // review view. Confirm first — items (words + phrases + grammar) awaiting
+  // a "do you know this?", the all-kinds total from the server — then the ★
+  // want-to-learn set and the should-know window. They paint into their own
+  // slot above the time log so they stay first.
   if (s.confirm_candidates > 0) {
     const n = s.confirm_candidates;
-    const banner = el("a", "confirm-banner") as HTMLAnchorElement;
-    banner.href = "#/confirm";
-    banner.appendChild(el("span", "cb-text",
+    bannerBox.appendChild(listBanner("#/confirm", "cb-confirm",
       `🧠 ${n} item${n > 1 ? "s" : ""} to confirm you know`));
-    banner.appendChild(el("span", "cb-go", "Review →"));
-    bannerBox.appendChild(banner);
+  }
+  if (s.want_to_learn > 0) {
+    const n = s.want_to_learn;
+    bannerBox.appendChild(listBanner("#/list/interest", "cb-interest",
+      `★ ${n} word${n > 1 ? "s" : ""} you want to learn`));
+  }
+  if (s.should_know) {
+    const n = s.should_know;
+    bannerBox.appendChild(listBanner("#/list/should_know", "cb-should",
+      `${n} most common word${n > 1 ? "s" : ""} you should know`));
   }
 
   // headline tiles

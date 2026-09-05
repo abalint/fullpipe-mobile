@@ -463,7 +463,7 @@ describe("playerView subtitle overlay", () => {
     expect(notes).toEqual([
       "grammar〜てしまう — 行っちゃった = 行く+てしまう",
       "grammar?ら抜き言葉 — 見られる→見れる", // proposed pattern
-      "phrase気を付ける — here: 気を付けて",
+      "phrase気を付ける — here: 気を付けてmark", // + its own mark button
     ]);
 
     // the un-annotated line shows none

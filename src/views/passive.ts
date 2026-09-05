@@ -253,6 +253,25 @@ export function passiveView(): HTMLElement {
   }
 
   async function load(): Promise<void> {
+    // Paint the cached snapshot first (same as the Queue tab): passive
+    // listening is the away-from-home feature, and an unreachable server
+    // takes the whole fetch deadline to fail — until then an empty list read
+    // as "nothing here". Downloaded episodes play fine from the snapshot;
+    // the live list (and its online-only actions) swaps in when the fetch
+    // returns. Skipped once rows are on screen so ↻ keeps the list visible.
+    if (!jobs.length) {
+      const snap = getCachedJobs();
+      if (snap) {
+        jobs = snap.jobs;
+        offline = true;
+        render();
+        status.textContent = `loading… · cached list from ${new Date(snap.at).toLocaleString()}`;
+      } else {
+        status.textContent = "loading…";
+      }
+    } else {
+      status.textContent = "loading…";
+    }
     try {
       jobs = await api.listJobs();
       offline = false;

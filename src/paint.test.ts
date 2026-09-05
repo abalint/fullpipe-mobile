@@ -4,7 +4,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
-import { clearTaps, cycleTap } from "./store";
+import { clearTaps, cycleTap, phraseTapKey, submitTaps } from "./store";
 import type { PaintState, TranscriptDoc } from "./types";
 import {
   applyKnown,
@@ -19,6 +19,9 @@ import {
   locallyInterest,
   locallyKnown,
   paintsInterest,
+  phraseClass,
+  phraseListsFor,
+  phrasesAt,
   sameLists,
   shouldKnowFor,
 } from "./paint";
@@ -148,5 +151,53 @@ describe("paint", () => {
     const cue = { start: 0, end: 1, grammar: [{ pattern: "〜てしまう" }, { pattern: "〜ながら" }] };
     expect(cueGrammarConfirm(cue, new Set(["〜ながら", "〜ておく"]))).toEqual(["〜ながら"]);
     expect(cueGrammarConfirm({ start: 0, end: 1 }, new Set(["〜ながら"]))).toEqual([]);
+  });
+});
+
+describe("phrase axis", () => {
+  const p = { canonical: "血が騒ぐ", surface: "血が騒いだ", start: 4, end: 7 };
+
+  it("a phrase mark never leaks into the word paint, and vice versa", () => {
+    cycleTap("ep1", phraseTapKey("血が騒ぐ")); // ✓ on the phrase
+    cycleTap("ep1", "血"); // ✓ on the word
+    expect(locallyKnown()).toEqual(new Set(["血"]));
+    expect(phraseListsFor(null).known).toEqual(new Set(["血が騒ぐ"]));
+    // the wire batch tags the phrase entry with its kind
+    expect(submitTaps("ep1").taps).toEqual(
+      expect.arrayContaining([["血が騒ぐ", "k", "phrase"], ["血", "k"]]),
+    );
+  });
+
+  it("phraseClass: local mark › live lists › sidecar snapshot › unknown", () => {
+    const lists = phraseListsFor(null);
+    expect(phraseClass(p, undefined, lists)).toBe("ph-unk");
+    expect(phraseClass({ ...p, status: "known" }, undefined, lists)).toBe("ph-known");
+    expect(phraseClass(p, "k", lists)).toBe("ph-known");
+    expect(phraseClass(p, "h", lists)).toBe("ph-int");
+    const live = phraseListsFor(state({ phrase_known: [], phrase_confirm: ["血が騒ぐ"] }));
+    expect(live.live).toBe(true);
+    expect(phraseClass(p, undefined, live)).toBe("ph-know");
+    // with a live phrase axis the sidecar's stale "known" no longer counts
+    expect(phraseClass({ ...p, status: "known" }, undefined, live)).toBe("ph-know");
+    const known = phraseListsFor(state({ phrase_known: ["血が騒ぐ"], phrase_interest: ["血が騒ぐ"] }));
+    expect(phraseClass(p, undefined, known)).toBe("ph-known"); // known retires ★
+  });
+
+  it("a ★ on a phrase in one episode paints purple in the next; ✓ ends it", () => {
+    cycleTap("ep1", phraseTapKey("血が騒ぐ"));
+    cycleTap("ep1", phraseTapKey("血が騒ぐ")); // → h
+    clearTaps("ep1"); // close-out — the journal keeps it
+    expect(phraseListsFor(state()).interest).toEqual(new Set(["血が騒ぐ"]));
+    cycleTap("ep2", phraseTapKey("血が騒ぐ")); // ✓ in the next show
+    expect(phraseListsFor(state()).interest.size).toBe(0);
+    expect(phraseListsFor(state()).known).toEqual(new Set(["血が騒ぐ"]));
+  });
+
+  it("phrasesAt covers the span; unplaced phrases only when asked", () => {
+    const unplaced = { canonical: "気を付ける", surface: "気を付けて" };
+    expect(phrasesAt([p, unplaced], 5)).toEqual([p]);
+    expect(phrasesAt([p, unplaced], 7)).toEqual([]);
+    expect(phrasesAt([p, unplaced], 7, true)).toEqual([unplaced]);
+    expect(phrasesAt(undefined, 0, true)).toEqual([]);
   });
 });

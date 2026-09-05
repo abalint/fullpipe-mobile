@@ -7,6 +7,8 @@ import type {
   FollowState,
   ItemKind,
   Job,
+  ListName,
+  ListWord,
   PageDoc,
   PaintState,
   PrepDoc,
@@ -101,6 +103,13 @@ export const api = {
   confirmWord: (kind: ItemKind, key: string, known: boolean) =>
     request<{ kind: ItemKind; key: string; known: boolean; status: string | null }>(
       "/confirm", { method: "POST", body: JSON.stringify({ kind, key, known }) }),
+  // the ★ want-to-learn list / the should-know window, as review rows
+  getWordList: (name: ListName) =>
+    request<{ list: ListName; words: ListWord[] }>(`/lists/${name}`),
+  // a mark made from a list review (no episode): "k" → known, "h" → ★
+  markListWord: (lemma: string, mark: "k" | "h") =>
+    request<{ lemma: string; mark: "k" | "h"; status: string | null; interest: boolean }>(
+      "/lists/mark", { method: "POST", body: JSON.stringify({ lemma, mark }) }),
   // shelve a watched episode into the passive-listening collection (or pull
   // it back out) — server-side flag only, artifacts stay put
   setPassive: (id: string, passive: boolean) =>

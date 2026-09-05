@@ -23,7 +23,18 @@ function glossText(senses?: DictEntry[]): string {
   return [...new Set(gs)].slice(0, 4).join("; ");
 }
 
-function candidateCard(c: ConfirmCandidate, onDone: (known: boolean) => void): HTMLElement {
+export interface CardAction {
+  label: string;
+  primary?: boolean;
+  /** resolves when the server took the mark; the card is then removed */
+  run: () => Promise<void>;
+}
+
+/** One review card: word (furigana over kanji), rank / kind badge, where it
+    was seen, gloss, and a row of actions. Shared by the confirm queue and
+    the ★ / should-know list views — same card, different verbs. */
+export function reviewCard(c: ConfirmCandidate, actions: CardAction[],
+                           onDone: () => void): HTMLElement {
   const kind = c.kind ?? "word";
   const card = el("div", "confirm-card");
 
@@ -42,8 +53,11 @@ function candidateCard(c: ConfirmCandidate, onDone: (known: boolean) => void): H
   if (kind === "grammar" && c.level != null)
     head.appendChild(el("span", "cc-badge", JLPT[c.level] ?? `L${c.level}`));
   else if (kind === "phrase") head.appendChild(el("span", "cc-badge", "phrase"));
-  const seen = c.episode_spread === 1 ? "1 episode" : `${c.episode_spread} episodes`;
-  head.appendChild(el("span", "cc-seen", `seen in ${seen}`));
+  else if (c.freq_rank != null && c.freq_rank > 0)
+    head.appendChild(el("span", "cc-rank", `#${c.freq_rank}`));
+  const seen = !c.episode_spread ? "not yet seen"
+    : c.episode_spread === 1 ? "seen in 1 episode" : `seen in ${c.episode_spread} episodes`;
+  head.appendChild(el("span", "cc-seen", seen));
   card.appendChild(head);
 
   const gloss = kind === "grammar" ? (c.gloss ?? "") : glossText(c.senses);
@@ -51,24 +65,35 @@ function candidateCard(c: ConfirmCandidate, onDone: (known: boolean) => void): H
   if (c.episodes?.length)
     card.appendChild(el("div", "cc-eps", c.episodes.slice(0, 3).join(" · ")));
 
-  const actions = el("div", "cc-actions");
-  const yes = el("button", "primary small", "✓ I know it") as HTMLButtonElement;
-  const no = el("button", "small", "Not yet") as HTMLButtonElement;
-  const answer = async (known: boolean) => {
-    yes.disabled = no.disabled = true;
-    try {
-      await api.confirmWord(kind, c.lemma, known);
-      onDone(known);
-    } catch (e) {
-      yes.disabled = no.disabled = false;
-      alert((e as Error).message);
-    }
-  };
-  yes.addEventListener("click", () => void answer(true));
-  no.addEventListener("click", () => void answer(false));
-  actions.append(yes, no);
-  card.appendChild(actions);
+  const row = el("div", "cc-actions");
+  const buttons = actions.map((a) =>
+    el("button", a.primary ? "primary small" : "small", a.label) as HTMLButtonElement);
+  buttons.forEach((b, i) => {
+    b.addEventListener("click", () => void (async () => {
+      buttons.forEach((x) => (x.disabled = true));
+      try {
+        await actions[i].run();
+        onDone();
+      } catch (e) {
+        buttons.forEach((x) => (x.disabled = false));
+        alert((e as Error).message);
+      }
+    })());
+  });
+  row.append(...buttons);
+  card.appendChild(row);
   return card;
+}
+
+function candidateCard(c: ConfirmCandidate, onDone: (known: boolean) => void): HTMLElement {
+  const kind = c.kind ?? "word";
+  let known = true;
+  return reviewCard(c, [
+    { label: "✓ I know it", primary: true,
+      run: async () => { known = true; await api.confirmWord(kind, c.lemma, true); } },
+    { label: "Not yet",
+      run: async () => { known = false; await api.confirmWord(kind, c.lemma, false); } },
+  ], () => onDone(known));
 }
 
 export function confirmView(): HTMLElement {

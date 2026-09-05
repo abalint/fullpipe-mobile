@@ -5,7 +5,11 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import demo from "./demo-prep.json";
-import type { PrepDoc, TapBatch } from "./types";
+import type {
+  ListWord,
+  PrepDoc,
+  TapBatch,
+} from "./types";
 import { renderPrep, rubyWord } from "./prep-render";
 import {
   actionEpisode,
@@ -30,6 +34,7 @@ import { backlogSeconds, hms, jobRow, pendingVideoDownloads, seriesBlock, sortJo
 import { groupSeries } from "./series";
 import { statsView } from "./views/stats";
 import { confirmView } from "./views/confirm";
+import { wordListView } from "./views/wordlist";
 import { cacheStats } from "./store";
 import type { ConfirmCandidate, Job, Stats } from "./types";
 
@@ -337,7 +342,7 @@ describe("statsView", () => {
   const stats: Stats = {
     known: 3442, learning: 218, episodes_watched: 27, episodes_total: 46,
     cards_minted: 240, needs_review: 0, confirm_candidates: 3,
-    words_encountered: 10389, want_to_learn: 49,
+    words_encountered: 10389, want_to_learn: 49, should_know: 100,
     freq_bands: [
       { band: 1000, known: 948, total: 1000 },
       { band: 2000, known: 1344, total: 2000 },
@@ -364,6 +369,22 @@ describe("statsView", () => {
     expect(banner).not.toBeNull();
     expect(banner!.getAttribute("href")).toBe("#/confirm");
     expect(banner!.textContent).toContain("3 items");
+    // the ★ and should-know lists get their own review links (LIVE_REVIEW.md §1)
+    const links = [...root.querySelectorAll<HTMLAnchorElement>("a.confirm-banner")]
+      .map((a) => a.getAttribute("href"));
+    expect(links).toEqual(["#/confirm", "#/list/interest", "#/list/should_know"]);
+    expect(root.querySelector(".cb-interest")!.textContent).toContain("49 words");
+    expect(root.querySelector(".cb-should")!.textContent).toContain("100 most common");
+    root.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("hides list banners a pre-list server / empty list can't fill", async () => {
+    vi.spyOn(api, "getStats").mockResolvedValue({ ...stats, want_to_learn: 0, should_know: undefined });
+    const root = statsView();
+    document.body.appendChild(root);
+    await vi.waitFor(() => expect(root.querySelectorAll(".ledger .stat-tile").length).toBe(4));
+    expect(root.querySelectorAll("a.confirm-banner").length).toBe(1);
     root.remove();
     vi.restoreAllMocks();
   });
@@ -377,6 +398,66 @@ describe("statsView", () => {
     expect(root.querySelectorAll(".ledger .stat-tile").length).toBe(4);
     await vi.waitFor(() =>
       expect(root.querySelector(".status")!.textContent).toMatch(/offline/));
+    root.remove();
+    vi.restoreAllMocks();
+  });
+});
+
+describe("wordListView", () => {
+  const words: ListWord[] = [
+    { lemma: "猫", kind: "word", reading: "ねこ", reading_segs: [["猫", "ねこ"]],
+      freq_rank: 12, exposure_count: 0, episode_spread: 0, episodes: [],
+      senses: [{ k: ["猫"], r: ["ねこ"], s: [{ pos: ["n"], g: ["cat"] }] }] },
+    { lemma: "設計", kind: "word", reading: "せっけい", reading_segs: [["設計", "せっけい"]],
+      freq_rank: 900, exposure_count: 3, episode_spread: 2, episodes: ["Ep A", "Ep B"] },
+  ];
+
+  it("renders the should-know list with rank, gloss, ✓ and ★ actions", async () => {
+    const get = vi.spyOn(api, "getWordList").mockResolvedValue({ list: "should_know", words });
+    const mark = vi.spyOn(api, "markListWord").mockResolvedValue({
+      lemma: "猫", mark: "h", status: "unknown", interest: true });
+    const root = wordListView("should_know");
+    document.body.appendChild(root);
+    await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(2));
+    expect(get).toHaveBeenCalledWith("should_know");
+    expect(root.querySelector(".status")!.textContent).toContain("2 words");
+    expect(root.textContent).toContain("cat"); // JMdict gloss
+    expect(root.querySelector(".cc-rank")!.textContent).toBe("#12");
+    expect(root.querySelector(".cc-seen")!.textContent).toBe("not yet seen");
+    const buttons = root.querySelectorAll<HTMLButtonElement>(".confirm-card .cc-actions button");
+    expect([...buttons].slice(0, 2).map((b) => b.textContent)).toEqual(["✓ I know it", "★ Want to learn"]);
+    buttons[1].click(); // ★ → onto the want-to-learn list, off this one
+    await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(1));
+    expect(mark).toHaveBeenCalledWith("猫", "h");
+    expect(root.querySelector(".status")!.textContent).toContain("1 word");
+    root.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("the ★ list offers only ✓ and empties to its own message", async () => {
+    vi.spyOn(api, "getWordList").mockResolvedValue({ list: "interest", words: [words[1]] });
+    const mark = vi.spyOn(api, "markListWord").mockResolvedValue({
+      lemma: "設計", mark: "k", status: "known", interest: false });
+    const root = wordListView("interest");
+    document.body.appendChild(root);
+    await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(1));
+    const buttons = root.querySelectorAll<HTMLButtonElement>(".confirm-card .cc-actions button");
+    expect(buttons.length).toBe(1);
+    expect(root.querySelector(".cc-seen")!.textContent).toBe("seen in 2 episodes");
+    buttons[0].click();
+    await vi.waitFor(() => expect(root.querySelectorAll(".confirm-card").length).toBe(0));
+    expect(mark).toHaveBeenCalledWith("設計", "k");
+    expect(root.querySelector(".status")!.textContent).toMatch(/Nothing starred/);
+    root.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("reports when the server is unreachable", async () => {
+    vi.spyOn(api, "getWordList").mockRejectedValue(new ApiError("Server unreachable"));
+    const root = wordListView("interest");
+    document.body.appendChild(root);
+    await vi.waitFor(() =>
+      expect(root.querySelector(".status")!.textContent).toMatch(/needs the server/));
     root.remove();
     vi.restoreAllMocks();
   });

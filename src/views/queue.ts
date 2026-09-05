@@ -5,6 +5,7 @@
 // outbox actions overlay the rows so a queued mark-watched reads as watched.
 
 import { api, ApiError } from "../api";
+import { cancelTapSync } from "../livesync";
 import {
   cachedPrepIds,
   cacheJobs,
@@ -657,6 +658,7 @@ export async function removeJob(job: Job, reload: () => void, offline = false): 
   const ep = job.episode_id;
   await deleteVideo(ep).catch(() => {}); // may never have been downloaded
   deleteCachedPrep(ep);
+  cancelTapSync(ep); // a debounce still running must not re-freeze the taps
   clearTaps(ep);
   clearSubmitted(ep);
   removeEpisodeActions(ep);

@@ -16,6 +16,7 @@ import type {
   PrepDoc,
   Stats,
   TapBatch,
+  TapEntry,
   TapMark,
   ViewSegment,
 } from "./types";
@@ -71,6 +72,21 @@ export function saveSettings(s: Settings): void {
 }
 
 // ---- tap marks (live, per episode) --------------------------------------------
+// One store per episode keyed by item: a word by its lemma, a phrase (the
+// popup's phrase layer, GRAMMAR.md) by "p:" + headword — the prefix keeps a
+// phrase mark off the word paint (blood 血 known ≠ 血が騒ぐ known) and tells
+// submitTaps which entries to send with kind "phrase".
+
+const PHRASE_TAP_PREFIX = "p:";
+
+export const phraseTapKey = (canonical: string): string => PHRASE_TAP_PREFIX + canonical;
+export const isPhraseTapKey = (key: string): boolean => key.startsWith(PHRASE_TAP_PREFIX);
+export const phraseFromTapKey = (key: string): string => key.slice(PHRASE_TAP_PREFIX.length);
+
+/** The wire entry for one stored mark. */
+export function tapEntry(key: string, mark: TapMark): TapEntry {
+  return isPhraseTapKey(key) ? [phraseFromTapKey(key), mark, "phrase"] : [key, mark];
+}
 
 export function getTaps(episodeId: string): Record<string, TapMark> {
   return read(K.taps(episodeId), {});
@@ -166,13 +182,23 @@ export function actionEpisode(a: OutboxAction): string {
   return a.episode_id;
 }
 
-/** Freeze the episode's current taps into the outbox. An empty batch is
-    still meaningful feedback ("no corrections — default selection"). */
+/** Freeze the episode's current taps into the outbox. The batch is the
+    episode's *whole* mark set (the server dedupes per word, so re-sending
+    is free), which means an unsent batch for the same episode is strictly
+    superseded — it is replaced in place, keeping its FIFO slot ahead of any
+    close-out queued after it. An empty batch is still meaningful feedback
+    ("no corrections — default selection"). */
 export function submitTaps(episodeId: string): TapBatch {
   const taps = getTaps(episodeId);
-  const entries = Object.entries(taps) as [string, TapMark][];
+  const entries = Object.entries(taps).map(([k, m]) => tapEntry(k, m));
   const batch: TapBatch = { episode_id: episodeId, batch_id: newId(), taps: entries };
-  pushAction({ id: newId(), kind: "taps", batch });
+  const action: OutboxAction = { id: newId(), kind: "taps", batch };
+  const outbox = getOutbox();
+  const stale = outbox.findIndex((a) => a.kind === "taps" && a.batch.episode_id === episodeId);
+  if (stale >= 0) {
+    outbox[stale] = action;
+    write(K.outbox, outbox);
+  } else pushAction(action);
   // Snapshot the sent marks as the new baseline, but DON'T clear the live taps:
   // they stay as the display source of truth so reopening the doc shows what you
   // submitted (styled "committed") instead of a blank, un-marked article.

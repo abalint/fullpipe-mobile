@@ -1,7 +1,7 @@
 // Page reader (#/page/<id>): a 5ch thread rendered as readable posts with
 // the same tap-a-word machinery as the player — every token is a tap target
 // (tokenSpan anyWord), taps open the shared gloss popup, marks cycle through
-// the shared tap store and submit as a normal tap batch. Reading is offline-
+// the shared tap store and sync live as normal tap batches. Reading is offline-
 // first: the bundle (posts + tokenized sentences + definitions) downloads on
 // first open and reads from disk after. "✓ finished" is the page's
 // mark-watched — exposures activate, no cards ever — after which the row can
@@ -30,6 +30,7 @@ import {
   refreshPageSidecars,
 } from "../pages";
 import {
+  getOutbox,
   getSubmitted,
   getTaps,
   pendingTapCount,
@@ -38,6 +39,7 @@ import {
   submitTaps,
 } from "../store";
 import { flushOutbox } from "../sync";
+import { cancelTapSync, onTapSync, scheduleTapSync } from "../livesync";
 import type { Definitions, PageDoc, PagePost, TranscriptSentence } from "../types";
 
 const CHUNK = 40; // posts rendered per fill — a 1000-post thread must not DOM-bomb
@@ -54,7 +56,7 @@ export function readerView(episodeId: string): HTMLElement {
   const titleEl = el("h1", "", getPageRecord(episodeId)?.title ?? "");
   const status = el("div", "status");
 
-  // --- toolbar: furigana · highlight · submit marks · finished -------------
+  // --- toolbar: furigana · highlight · mark-sync state · finished ----------
   // Both display toggles are global reading preferences (persisted), not
   // per-thread. The popup always shows furigana regardless of あ — scoped in
   // style.css — because looking a word up is asking for its reading.
@@ -83,11 +85,12 @@ export function readerView(episodeId: string): HTMLElement {
   });
   syncRuby();
   syncHl();
-  const submitBtn = el("button", "small", "⇪ submit marks") as HTMLButtonElement;
+  // marks sync on their own (livesync.ts); this only says where they stand
+  const syncEl = el("span", "small muted sync-state");
   const doneBtn = el("button", "small", "✓ finished") as HTMLButtonElement;
   const backLink = el("a", "small btn", "‹ pages") as HTMLAnchorElement;
   backLink.href = "#/pages";
-  toolbar.append(backLink, rubyBtn, hlBtn, submitBtn, doneBtn);
+  toolbar.append(backLink, rubyBtn, hlBtn, syncEl, doneBtn);
 
   const posts = el("div", "posts");
   const moreBtn = el("button", "small more", "… more posts") as HTMLButtonElement;
@@ -110,7 +113,8 @@ export function readerView(episodeId: string): HTMLElement {
     interest: () => lists.interest,
     onMarkChanged: () => {
       paintTaps();
-      syncSubmit();
+      scheduleTapSync(episodeId);
+      syncState();
     },
     extraClass: "fixed",
   });
@@ -134,11 +138,23 @@ export function readerView(episodeId: string): HTMLElement {
     });
   };
 
-  const syncSubmit = () => {
+  const syncState = () => {
     const n = pendingTapCount(episodeId);
-    submitBtn.textContent = n ? `⇪ submit marks (${n})` : "⇪ submit marks";
-    submitBtn.disabled = !n;
+    const queued = getOutbox().some(
+      (a) => a.kind === "taps" && a.batch.episode_id === episodeId,
+    );
+    syncEl.textContent = n ? `⇪ ${n}…` : queued ? "⇪ queued" : "";
+    syncEl.title = n
+      ? `${n} mark${n > 1 ? "s" : ""} syncing`
+      : queued
+        ? "marks queued — will sync when reachable"
+        : "";
   };
+  onTapSync((ep) => {
+    if (ep !== episodeId || !root.isConnected) return;
+    paintTaps();
+    syncState();
+  });
 
   const syncDone = () => {
     const done = !!pendingWatched(episodeId);
@@ -146,30 +162,22 @@ export function readerView(episodeId: string): HTMLElement {
     doneBtn.disabled = done;
   };
 
-  submitBtn.addEventListener("click", () => {
-    submitBtn.disabled = true;
-    submitTaps(episodeId);
-    void flushOutbox().then(() => {
-      paintTaps();
-      syncSubmit();
-    });
-  });
-
   doneBtn.addEventListener("click", () => {
     const n = pendingTapCount(episodeId);
     if (
       !confirm(
         "Finished reading? Word exposures land in the ledger; no Anki cards are made." +
-          (n ? `\n\n${n} unsubmitted mark(s) will be submitted first.` : ""),
+          (n ? `\n\n${n} unsynced mark(s) will be sent first.` : ""),
       )
     )
       return;
+    cancelTapSync(episodeId);
     if (n) submitTaps(episodeId); // FIFO: taps flush before the watched
     queueWatched(episodeId, false); // pages never mint cards
     syncDone();
     void flushOutbox().then(() => {
       paintTaps();
-      syncSubmit();
+      syncState();
       syncDone();
     });
   });
@@ -290,8 +298,10 @@ export function readerView(episodeId: string): HTMLElement {
       titleEl.textContent = doc.title;
       status.textContent = `${doc.post_count} posts`;
       fill();
-      syncSubmit();
+      syncState();
       syncDone();
+      // marks made before this reopen and never sent (app killed mid-debounce)
+      if (pendingTapCount(episodeId)) scheduleTapSync(episodeId);
       void fetchPaint(episodeId).then((fresh) => {
         if (!fresh || !root.isConnected) return;
         const moved = applyKnown(sentences, knownFor(fresh));

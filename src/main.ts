@@ -11,6 +11,7 @@ import { playerView } from "./views/player";
 import { settingsView } from "./views/settings";
 import { statsView } from "./views/stats";
 import { confirmView } from "./views/confirm";
+import { wordListView } from "./views/wordlist";
 import { flushOutbox, installAutoFlush } from "./sync";
 import { importListenLog, recoverOpenSegment } from "./viewtime";
 import { installShareTarget } from "./share";
@@ -43,6 +44,8 @@ function route(): void {
   else if (view === "listen") node = passiveView();
   else if (view === "progress") node = statsView();
   else if (view === "confirm") node = confirmView();
+  else if (view === "list" && (arg === "interest" || arg === "should_know"))
+    node = wordListView(arg);
   else if (view === "settings") node = settingsView();
   else if (view === "prep") {
     // bare prep tab → most recently cached doc, else nudge to queue

@@ -68,14 +68,19 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   last `GET /jobs` snapshot when unreachable, with server-only actions
   (curate, delete, download) hidden and everything local still live.
   Every write is a typed action in the outbox — tap batches, mark-watched,
-  ratings, even enqueues — flushed FIFO on submit / app-foreground /
+  ratings, even enqueues — flushed FIFO on mark-sync / app-foreground /
   network-return, so an episode's feedback lands before its close-out. Each
   kind is replay-safe (`batch_id` / client `review_id` dedup; watched/enqueue
   idempotent); a permanently rejected action (episode deleted server-side) is
   dropped rather than blocking the queue. Rows with unsynced actions carry a
   `⇪ pending sync` chip, and a queued mark-watched shows as watched. Taps
-  accumulate per episode in localStorage; **Submit** freezes them into a batch.
-  "Copy blob" keeps the P9 copy-paste fallback.
+  accumulate per episode in localStorage and **sync live** (`livesync.ts`):
+  a change starts a ~1.2 s debounce, then the episode's whole mark set is
+  frozen into one batch (an unsent batch for the same episode is replaced in
+  place — the server dedupes per word, so re-sending is free) and the outbox
+  flushes. There is no submit button; the prep bar / reader toolbar only
+  narrate the state (syncing… / queued / synced ✔). A close-out (Mark watched,
+  finished) sends any still-debouncing marks first.
 - **Sort + filter** (Queue and Listen tabs, `listfilter.ts`): the sort select
   (newest / oldest / easiest / hardest / longest / shortest / top rated /
   title) plus a filter row — status (to watch · watched · in progress),
@@ -149,12 +154,17 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   the episodes they appeared in); you answer **✓ I know it** (`POST /confirm`
   known → the word counts as known) or **Not yet** (stays learning, snoozed
   until more exposures). Server-backed.
+- **Want-to-learn / Should-know lists** (`#/list/interest`, `#/list/should_know`,
+  banners on Progress beside Confirm's): the other two global word lists
+  (LIVE_REVIEW.md §1) reviewed with the same card — reading, corpus rank,
+  where you've seen it, JMdict gloss (`GET /lists/{name}`). **✓ I know it**
+  (`POST /lists/mark` k) takes a word off every list; on the should-know list
+  **★ Want to learn** (mark h) pulls it onto the ★ list. Server-backed.
 - **Retry a failed job:** a `failed` Stage-1 row now carries a `↻ retry` button
   (`POST /jobs/{id}/retry` re-queues it) instead of forcing a delete-and-repaste.
   Jobs stranded mid-flight by a server restart are reclaimed automatically
   server-side (`jobqueue.reap_stale`) — a stranded card-push resurfaces as the
   existing retry-cards path.
-- **Submit with no taps** calls `POST /watched/{id}` instead.
 - **Rating + tags:** stars on watched/staged queue rows and the post-watch prep
   bar. Once a star is set, the six taste tags appear (grouped liked/didn't, all
   shown regardless of the star); taps are debounced and append a review via
@@ -165,7 +175,7 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   Subtitles are an overlay built from the tokenized transcript
   (`GET /transcript`, cached at download as `videos/<ep>.transcript.json`) —
   every content word is a tap target feeding the *same* per-episode tap store
-  as the prep doc, so watch-time marks ride the next Submit; plain-SRT
+  as the prep doc, so watch-time marks sync live like prep-doc marks; plain-SRT
   fallback when no transcript exists. Cues linger until the next line (capped
   +2.5 s) so ASR sentence-end timing doesn't cut subs off early; classic
   white-on-black-outline styling. Prep-doc keywords (curated gloss rows +

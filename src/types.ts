@@ -76,10 +76,16 @@ export interface SentenceGrammar {
   proposed?: boolean; // novel pattern awaiting taxonomy review
 }
 
-/** A curated multi-word expression on one sentence (GRAMMAR.md). */
+/** A multi-word expression on one sentence (GRAMMAR.md) — its own ledger
+    item, independent of the words inside it: all of 血 / が / 騒ぐ can be
+    known while 血が騒ぐ is not. The player paints the span as one unit and
+    the popup gives it its own mark. */
 export interface SentencePhrase {
-  canonical: string; // JMdict headword
+  canonical: string; // JMdict headword = the ledger key
   surface?: string; // as it appears in the line
+  start?: number; // token span [start, end) within the sentence — absent when
+  end?: number; //   the server couldn't place it (or on old sidecars)
+  status?: "unknown" | "learning" | "known"; // ledger status when pulled
 }
 
 /** One subtitle cue for the player: a prep-shaped sentence with timing. */
@@ -124,6 +130,11 @@ export interface PaintState {
   interest: string[];
   should_know?: string[]; // absent from old cached states
   grammar_confirm: string[];
+  /** The phrase axis (GRAMMAR.md), narrowed to this episode's phrases:
+      known / think-you-know / ★ — absent from old cached states. */
+  phrase_known?: string[];
+  phrase_confirm?: string[];
+  phrase_interest?: string[];
   at: string;
 }
 
@@ -224,6 +235,7 @@ export interface Stats {
   confirm_candidates: number; // items to confirm, ALL kinds (banner count)
   words_encountered: number; // distinct lemmas ever exposed
   want_to_learn: number; // standing high-interest set not yet known
+  should_know?: number; // the should-know window (100 most frequent unknowns) — absent on older servers
   freq_bands: FreqBand[];
   evidence_by_source: Record<string, number>;
   // sibling axes — absent on pre-grammar servers
@@ -256,14 +268,26 @@ export interface ConfirmCandidate {
   gloss?: string | null;
 }
 
+/** The other two global word lists, reviewable like the confirm queue (GET
+    /lists/{name}): `interest` = the standing ★ want-to-learn set, `should_know`
+    = the most frequent words not yet known. Rows share the confirm-queue word
+    shape so one card renders all three. */
+export type ListName = "interest" | "should_know";
+export type ListWord = ConfirmCandidate;
+
 /** "k" = I know this (ledger evidence) · "h" = high interest (card priority).
     Unknown needs no mark — candidates are presumed unknown. */
 export type TapMark = "k" | "h";
 
+/** One mark: [lemma, mark] for a word, [headword, mark, "phrase"] for a
+    multi-word expression marked from the popup's phrase layer (the server
+    records it on the phrase item, never on the words inside it). */
+export type TapEntry = [string, TapMark] | [string, TapMark, "phrase"];
+
 export interface TapBatch {
   episode_id: string;
   batch_id: string;
-  taps: [string, TapMark][];
+  taps: TapEntry[];
 }
 
 /** Channel follow intent (SURVEY.md §4a) — a per-channel signal, not a video
