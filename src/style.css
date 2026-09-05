@@ -483,14 +483,8 @@ details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: po
 .subs-overlay .w.hl-know { background: none; color: #6fd0ff; }  /* blue: think you know */
 .subs-overlay .w.hl-int { background: none; color: #c58fff; }   /* purple: high interest */
 .subs-overlay .w.hl-sk { background: none; color: #7ee787; }    /* green: should know */
-/* phrase spans (paint.ts phraseClass): an underline in the PHRASE's own
-   colour across all its tokens — a second axis under the word colours, so
-   血が騒いだ reads as one unit even when 血 / 騒ぐ are both known */
-.subs-overlay .w.ph { padding-bottom: 1px; border-bottom: 2px solid transparent; }
-.subs-overlay .w.ph-unk { border-bottom-color: #ffa040; border-bottom-style: dashed; }
-.subs-overlay .w.ph-know { border-bottom-color: #6fd0ff; }
-.subs-overlay .w.ph-int { border-bottom-color: #c58fff; }
-.subs-overlay .w.ph-known { border-bottom-color: transparent; }
+/* phrase spans paint as one word in the phrase's state (player.ts
+   paintTaps) — the same hues as above, no separate underline */
 /* grammar-point-awaiting-confirm line marker: same blue as a think-you-know
    word, same badge shape as +1 */
 .subs-overlay .know-badge {

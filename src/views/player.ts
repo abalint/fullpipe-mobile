@@ -667,7 +667,11 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       both), each word's highlight is re-derived, and the tap classes layered
       on top. Keeps the span elements, so an open popup stays anchored. */
   const HL_CLASSES = ["hl-know", "hl-int", "hl-sk", "kw", "hl-hv", "hl-target", "hl-unk"];
-  const PH_CLASSES = ["ph", "ph-known", "ph-know", "ph-int", "ph-unk", "ph-first", "ph-last"];
+  // a phrase span paints like ONE word in the phrase's state (user rule,
+  // 2026-09-05: no separate underline) — its tokens take the word hues
+  const PHRASE_HL: Record<string, string | null> = {
+    "ph-known": null, "ph-know": "hl-know", "ph-int": "hl-int", "ph-unk": "hl-unk",
+  };
   const paintTaps = () => {
     const taps = getTaps(episodeId);
     lists = listsFor(paint, snapshot);
@@ -680,26 +684,29 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       const mark = taps[lemma];
       const ti = w.dataset.ti != null ? Number(w.dataset.ti) : undefined;
       const t = ti != null ? c?.tokens?.[ti] : undefined;
+      // the phrase span this token sits in (GRAMMAR.md) is one unit: every
+      // token of it paints as if it were that one word, in the PHRASE's
+      // state — so an unknown expression made of known words still shows
+      const p = ti != null && tier !== "off"
+        ? phraseToPaint(c?.phrases, c?.tokens, ti, episodeId, phraseLists)
+        : undefined;
+      w.classList.remove(...HL_CLASSES);
+      if (p) {
+        const pmark = taps[phraseTapKey(p.canonical)];
+        const hl = PHRASE_HL[phraseClass(p, pmark, phraseLists)];
+        if (hl && (hl !== "hl-unk" || tier === "learn")) w.classList.add(hl);
+        w.classList.toggle("tap-k", pmark === "k");
+        w.classList.toggle("tap-h", pmark === "h");
+        w.dataset.phrase = p.canonical;
+        return;
+      }
+      delete w.dataset.phrase;
       if (t) {
         const hl = tokenHighlight(t, tier, keywords, highValue, target, c!.cls, lists);
-        w.classList.remove(...HL_CLASSES);
         if (hl) w.classList.add(hl);
       }
       w.classList.toggle("tap-k", mark === "k");
       w.classList.toggle("tap-h", paintsInterest(mark, lemma, lists.interest));
-      // the phrase span this token sits in (GRAMMAR.md) — an underline in
-      // the PHRASE's colour across every token of it, at any tier but off,
-      // so an unknown expression made of known words is still visible
-      w.classList.remove(...PH_CLASSES);
-      const p = ti != null && tier !== "off"
-        ? phraseToPaint(c?.phrases, c?.tokens, ti, episodeId, phraseLists)
-        : undefined;
-      if (p) {
-        w.classList.add("ph", phraseClass(p, taps[phraseTapKey(p.canonical)], phraseLists));
-        if (ti === p.start) w.classList.add("ph-first");
-        if (ti === p.end! - 1) w.classList.add("ph-last");
-        w.dataset.phrase = p.canonical;
-      } else delete w.dataset.phrase;
     });
   };
 

@@ -31,7 +31,7 @@ import {
 } from "./views/player";
 import type { Cue, SubTier } from "./views/player";
 import type { PaintLists } from "./paint";
-import { cachePrep, cycleTap, getTaps, saveSettings } from "./store";
+import { cachePrep, cycleTap, getTaps, saveSettings, phraseTapKey } from "./store";
 import { clearPosition, getPosition, savePosition } from "./video";
 import type { PrepDoc } from "./types";
 
@@ -524,6 +524,30 @@ describe("playerView subtitle overlay", () => {
     expect(root.querySelector(".subs-overlay .iplus-badge")).toBeNull();
     const w = root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma='公園']")!;
     expect(w.className).toBe("w unk"); // tokenSpan's classes only — no hl-*
+    root.remove();
+  });
+
+  it("a phrase span paints as one word in the phrase's state, over its known tokens", async () => {
+    // 犬が is a tracked phrase the user doesn't know; 犬 itself is known
+    const doc = JSON.parse(JSON.stringify(TRANSCRIPT));
+    doc.sentences[0].tokens[1] = { s: "が", l: "が", c: false };
+    doc.sentences[0].phrases = [
+      { canonical: "犬が", surface: "犬が", start: 0, end: 2, status: "unknown" },
+    ];
+    const { root, video } = await mount(doc);
+    video.dispatchEvent(new Event("timeupdate"));
+    const dog = root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma='犬']")!;
+    expect(dog.classList.contains("hl-unk")).toBe(true); // the phrase's state, not 犬's
+    expect(dog.dataset.phrase).toBe("犬が");
+    // marking the PHRASE known clears it — the same look as a known word
+    cycleTap(EP, phraseTapKey("犬が"));
+    dog.click(); // popup + repaint path
+    root.querySelector<HTMLElement>(".gp-phrase .gp-mark")!.click(); // ✓ → ★
+    root.querySelector<HTMLElement>(".gp-phrase .gp-mark")!.click(); // ★ → clear
+    root.querySelector<HTMLElement>(".gp-phrase .gp-mark")!.click(); // → ✓
+    expect(dog.classList.contains("hl-unk")).toBe(false);
+    expect(dog.classList.contains("tap-k")).toBe(true);
+    expect(getTaps(EP)["犬"]).toBeUndefined(); // the word was never marked
     root.remove();
   });
 

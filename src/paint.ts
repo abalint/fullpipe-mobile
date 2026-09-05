@@ -133,10 +133,11 @@ export function samePhraseLists(a: PhraseLists, b: PhraseLists): boolean {
     same(a.interest, b.interest) && a.live === b.live;
 }
 
-/** How a phrase span paints: ph-known (no colour — known is the absence of
-    paint, as for words), ph-know (blue, think you know), ph-int (purple ★),
-    ph-unk (orange, you don't know it as a unit). `mark` is the phone's own
-    mark on the phrase; a ✓ wins, then a ★, then the ledger. */
+/** A phrase span's state, which the player maps onto the WORD hues (a
+    phrase paints as one word): ph-known (no colour — known is the absence
+    of paint), ph-know (blue, think you know), ph-int (purple ★), ph-unk
+    (orange, you don't know it as a unit). `mark` is the phone's own mark on
+    the phrase; a ✓ wins, then a ★, then the ledger. */
 export function phraseClass(
   p: SentencePhrase,
   mark: TapMark | undefined,
