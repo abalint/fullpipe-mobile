@@ -55,8 +55,10 @@ export function reviewCard(c: ConfirmCandidate, actions: CardAction[],
   else if (kind === "phrase") head.appendChild(el("span", "cc-badge", "phrase"));
   else if (c.freq_rank != null && c.freq_rank > 0)
     head.appendChild(el("span", "cc-rank", `#${c.freq_rank}`));
-  const seen = !c.episode_spread ? "not yet seen"
-    : c.episode_spread === 1 ? "seen in 1 episode" : `seen in ${c.episode_spread} episodes`;
+  const eps = c.episode_spread === 1 ? "1 episode" : `${c.episode_spread} episodes`;
+  let seen = !c.episode_spread ? "not yet seen"
+    : c.seen_active ? `seen ${c.seen_active}× in ${eps}` : `seen in ${eps}`;
+  if (c.seen_passive) seen += ` · ${c.seen_passive}× passive`;
   head.appendChild(el("span", "cc-seen", seen));
   card.appendChild(head);
 

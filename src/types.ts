@@ -262,6 +262,8 @@ export interface ConfirmCandidate {
   freq_rank?: number | null;
   exposure_count: number;
   episode_spread: number;
+  seen_active?: number; // times seen: occurrences × player plays over watched episodes
+  seen_passive?: number; // times heard on the Listen tab (counted apart, never feeds θ)
   episodes: string[]; // watched-episode titles it turned up in
   senses?: DictEntry[]; // JMdict glosses (word/phrase), when jmdict.db exists
   // grammar rows only:
