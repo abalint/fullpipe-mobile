@@ -9,6 +9,7 @@
 // replay-safe server-side (batch_id / review_id dedup, idempotent
 // watched/enqueue), so a double-flush after a flaky connection is harmless.
 
+import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import type {
   FollowState,
   Job,
@@ -459,15 +460,70 @@ export function setOpenViewSegment(seg: ViewSegment | null): void {
 }
 
 // ---- prep-doc cache -------------------------------------------------------------
+// Prep docs run 80–130 KB of JSON each and localStorage holds ~5 MB of UTF-16
+// per origin, so the cache overflowed at ~40 episodes ("Failed to execute
+// 'setItem' on 'Storage': … exceeded the quota", 2026-09-06 morning sync).
+// Bodies now live on the filesystem (prep/<id>.json, Directory.Data, next to
+// the video sidecars); the small index stays in localStorage, and an in-memory
+// map keeps getCachedPrep synchronous for the views. hydratePrepCache() loads
+// the bodies once at startup; a legacy localStorage body is migrated out (and
+// its quota freed) the first time it is read.
+
+const prepMem = new Map<string, PrepDoc>();
+const prepPath = (id: string) => `prep/${id}.json`;
+
+async function writePrepFile(doc: PrepDoc): Promise<void> {
+  try {
+    await Filesystem.writeFile({
+      path: prepPath(doc.episode.id),
+      directory: Directory.Data,
+      data: JSON.stringify(doc),
+      encoding: Encoding.UTF8,
+      recursive: true,
+    });
+  } catch {
+    /* best-effort — the doc stays in memory for this session and is refetched
+       from the server on the next open if it is gone */
+  }
+}
+
+async function readPrepFile(id: string): Promise<PrepDoc | null> {
+  try {
+    const { data } = await Filesystem.readFile({
+      path: prepPath(id),
+      directory: Directory.Data,
+      encoding: Encoding.UTF8,
+    });
+    return JSON.parse(data as string) as PrepDoc;
+  } catch {
+    return null;
+  }
+}
+
+/** A body cached by the pre-2026-09-06 build (localStorage). Moves it to the
+    filesystem and frees the quota; returns it, or null when none. */
+function migrateLegacyPrep(id: string): PrepDoc | null {
+  const legacy = read<PrepDoc | null>(K.prep(id), null);
+  if (!legacy) return null;
+  prepMem.set(id, legacy);
+  localStorage.removeItem(K.prep(id));
+  void writePrepFile(legacy);
+  return legacy;
+}
 
 export function cachePrep(doc: PrepDoc): void {
-  write(K.prep(doc.episode.id), doc);
+  const id = doc.episode.id;
+  prepMem.set(id, doc);
   const idx = read<string[]>(K.prepIndex, []);
-  if (!idx.includes(doc.episode.id)) write(K.prepIndex, [...idx, doc.episode.id]);
+  if (!idx.includes(id)) write(K.prepIndex, [...idx, id]);
+  localStorage.removeItem(K.prep(id)); // legacy body, if any
+  void writePrepFile(doc);
 }
 
 export function getCachedPrep(episodeId: string): PrepDoc | null {
-  return read<PrepDoc | null>(K.prep(episodeId), null);
+  // the index is the source of truth (clearing localStorage forgets the cache)
+  if (!cachedPrepIds().includes(episodeId)) return null;
+  return prepMem.get(episodeId) ?? migrateLegacyPrep(episodeId);
 }
 
 export function cachedPrepIds(): string[] {
@@ -475,9 +531,27 @@ export function cachedPrepIds(): string[] {
 }
 
 export function deleteCachedPrep(episodeId: string): void {
+  prepMem.delete(episodeId);
   localStorage.removeItem(K.prep(episodeId));
   write(
     K.prepIndex,
     cachedPrepIds().filter((id) => id !== episodeId),
+  );
+  void Filesystem.deleteFile({ path: prepPath(episodeId), directory: Directory.Data }).catch(
+    () => {},
+  );
+}
+
+/** Load every indexed prep body into memory (filesystem, or a legacy
+    localStorage body). Call once at startup before the first route so the
+    synchronous readers see the offline cache. Missing bodies are simply
+    absent — the prep view refetches them online. */
+export async function hydratePrepCache(): Promise<void> {
+  await Promise.all(
+    cachedPrepIds().map(async (id) => {
+      if (prepMem.has(id) || migrateLegacyPrep(id)) return;
+      const doc = await readPrepFile(id);
+      if (doc) prepMem.set(id, doc);
+    }),
   );
 }

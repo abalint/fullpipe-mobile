@@ -16,7 +16,7 @@ import { flushOutbox, installAutoFlush } from "./sync";
 import { importListenLog, recoverOpenSegment } from "./viewtime";
 import { installShareTarget } from "./share";
 import { isPageSource } from "./pages";
-import { cachedPrepIds, getCachedJobs, getSettings } from "./store";
+import { cachedPrepIds, getCachedJobs, getSettings, hydratePrepCache } from "./store";
 import { nowPlayingStrip } from "./nowplaying";
 
 const outlet = document.getElementById("outlet")!;
@@ -79,7 +79,9 @@ document.addEventListener("visibilitychange", () => {
 
 // first-run: no server configured → land on settings
 if (!getSettings().serverUrl && !location.hash) location.hash = "#/settings";
-route();
+// prep bodies live on the filesystem (store.ts) — load them before the first
+// paint so the offline cache is visible to the synchronous readers
+void hydratePrepCache().then(route, route);
 // after a background flush lands, rebuild the queue so pending-sync chips and
 // stale snapshot states catch up with the server
 installAutoFlush(() => {
