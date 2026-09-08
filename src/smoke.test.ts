@@ -26,6 +26,10 @@ import {
   removeEpisodeActions,
   saveSettings,
   submitTaps,
+  recordLookup,
+  getLookups,
+  phraseTapKey,
+  clearTaps,
 } from "./store";
 import { flushOutbox } from "./sync";
 import { api, ApiError } from "./api";
@@ -116,6 +120,24 @@ describe("rubyWord", () => {
 });
 
 describe("outbox", () => {
+  it("carries the episode's popup lookups in the batch, cumulative, and clears them at close-out", () => {
+    recordLookup(ep, "犬", "should_know");
+    recordLookup(ep, "犬", "none");
+    recordLookup(ep, phraseTapKey("気を付ける"), "interest");
+    let batch = submitTaps(ep);
+    expect(batch.lookups).toEqual([
+      ["犬", 2, { should_know: 1, none: 1 }],
+      ["気を付ける", 1, { interest: 1 }, "phrase"],
+    ]);
+    expect(batch.taps).toEqual([]);
+    recordLookup(ep, "犬", "none");
+    batch = submitTaps(ep);
+    expect(batch.lookups![0]).toEqual(["犬", 3, { should_know: 1, none: 2 }]);
+    clearTaps(ep);
+    expect(getLookups(ep)).toEqual({});
+    expect(submitTaps(ep).lookups).toBeUndefined();
+  });
+
   it("freezes taps into a batch but retains the marks as a submitted baseline", () => {
     const root = renderPrep(doc);
     document.body.appendChild(root);

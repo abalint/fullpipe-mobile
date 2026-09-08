@@ -14,6 +14,7 @@ import {
   getCachedPaint,
   listClass,
   listsFor,
+  lookupListOf,
   NO_LISTS,
   paintsInterest,
   sameLists,
@@ -115,6 +116,9 @@ export function readerView(episodeId: string): HTMLElement {
       scheduleTapSync(episodeId);
       syncState();
     },
+    listOf: (lemma, ti, sentence) =>
+      lookupListOf(lemma, lists, !!(ti != null && sentence?.tokens?.[ti]?.k)),
+    onLookup: () => scheduleTapSync(episodeId),
     extraClass: "fixed",
   });
   root.appendChild(popup.el);

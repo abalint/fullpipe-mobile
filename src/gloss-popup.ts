@@ -16,10 +16,11 @@ import { inflectionAt } from "./inflection";
 import { NO_PHRASES, phrasesAt } from "./paint";
 import type { PhraseLists } from "./paint";
 import { rubyWord, segsNode } from "./prep-render";
-import { cycleTap, getTaps, phraseTapKey } from "./store";
+import { cycleTap, getTaps, phraseTapKey, recordLookup } from "./store";
 import type {
   Definitions,
   GlossEntry,
+  LookupList,
   Segs,
   SentenceGrammar,
   SentencePhrase,
@@ -60,6 +61,11 @@ export interface GlossPopupOptions {
   keywords?(): Map<string, KeywordInfo>;
   /** Fired after the mark button cycles, so the host can repaint its spans. */
   onMarkChanged?(): void;
+  /** What the tapped word is painted as right now (paint.ts lookupListOf) —
+      recorded with every open (store.ts recordLookup). Absent ⇒ "none". */
+  listOf?(lemma: string, ti?: number, sentence?: PopupSentence): LookupList;
+  /** Fired after an open is recorded, so the host can schedule the sync. */
+  onLookup?(): void;
   /** Extra class on the card — "fixed" pins it above the bottom nav (the
       reader's scrolling page has no stage to anchor to). */
   extraClass?: string;
@@ -177,6 +183,9 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
   };
 
   const show = (lemma: string, ti?: number, sentence?: PopupSentence) => {
+    // a look-up is counted, never judged: the word keeps its lists and status
+    recordLookup(opts.episodeId, lemma, opts.listOf?.(lemma, ti, sentence) ?? "none");
+    opts.onLookup?.();
     const info = opts.keywords?.().get(lemma);
     const defs = opts.defs();
     const entries = defs[lemma] ?? [];

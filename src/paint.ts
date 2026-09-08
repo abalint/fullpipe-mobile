@@ -26,7 +26,9 @@ import { api } from "./api";
 import { confirmList } from "./lists";
 import { compoundRunsAt } from "./compounds";
 import { getMarkJournal, getTaps, isPhraseTapKey, phraseFromTapKey, phraseTapKey } from "./store";
-import type { PaintState, SentencePhrase, TapMark, Token, TranscriptDoc } from "./types";
+import type { PaintState, SentencePhrase, TapMark, Token, TranscriptDoc,
+  LookupList,
+} from "./types";
 
 const key = (ep: string) => `fp.paint.${ep}`;
 
@@ -253,6 +255,20 @@ export function listClass(lemma: string | undefined, lists: PaintLists): string 
   if (lists.interest.has(lemma)) return "hl-int";
   if (lists.shouldKnow.has(lemma)) return "hl-sk";
   return null;
+}
+
+/** What a word is painted as at the moment its popup opens, for the lookup
+    count (store.ts recordLookup): known (the live `k` flag) first — a known
+    word is on no list — then the list it sits on, else plain. */
+export function lookupListOf(
+  lemma: string | undefined,
+  lists: PaintLists,
+  known: boolean,
+): LookupList {
+  if (known) return "known";
+  const cls = listClass(lemma, lists);
+  return cls === "hl-know" ? "confirm" : cls === "hl-int" ? "interest"
+    : cls === "hl-sk" ? "should_know" : "none";
 }
 
 /** Does this word paint ★? A local ★, or standing interest with no local

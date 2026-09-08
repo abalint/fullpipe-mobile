@@ -264,6 +264,8 @@ export interface ConfirmCandidate {
   episode_spread: number;
   seen_active?: number; // times seen: occurrences × player plays over watched episodes
   seen_passive?: number; // times heard on the Listen tab (counted apart, never feeds θ)
+  lookups?: number; // popup opens with no mark, all episodes
+  lookups_listed?: number; // …of which while the word sat on a list
   episodes: string[]; // watched-episode titles it turned up in
   senses?: DictEntry[]; // JMdict glosses (word/phrase), when jmdict.db exists
   // grammar rows only:
@@ -292,10 +294,23 @@ export type TapMark = "k" | "h" | "u";
     records it on the phrase item, never on the words inside it). */
 export type TapEntry = [string, TapMark] | [string, TapMark, "phrase"];
 
+/** What a word was painted as when its popup opened: a list (blue
+    think-you-know / ★ interest / green should-know), plain known, or nothing. */
+export type LookupList = "confirm" | "interest" | "should_know" | "known" | "none";
+
+/** One item's popup opens in an episode, cumulative: [key, n, {list: n}] for
+    a word, with a trailing "phrase" for a phrase-layer headword. Sent whole
+    with every batch; the server replaces the row rather than stacking. */
+export type LookupEntry =
+  | [string, number, Partial<Record<LookupList, number>>]
+  | [string, number, Partial<Record<LookupList, number>>, "phrase"];
+
 export interface TapBatch {
   episode_id: string;
   batch_id: string;
   taps: TapEntry[];
+  /** Popup opens without a mark — a "what was that?" is tracked, never judged. */
+  lookups?: LookupEntry[];
 }
 
 /** Channel follow intent (SURVEY.md §4a) — a per-channel signal, not a video

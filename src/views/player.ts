@@ -40,6 +40,7 @@ import {
   getCachedPaint,
   listClass,
   listsFor,
+  lookupListOf,
   NO_LISTS,
   paintsInterest,
   phraseClass,
@@ -498,6 +499,10 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       paintTaps();
       scheduleTapSync(episodeId);
     },
+    // the live `k` flag (applyPaintKnown) says known; else the list it is on
+    listOf: (lemma, ti, sentence) =>
+      lookupListOf(lemma, lists, !!(ti != null && sentence?.tokens?.[ti]?.k)),
+    onLookup: () => scheduleTapSync(episodeId),
   });
   stage.append(video, overlay, popup.el);
 

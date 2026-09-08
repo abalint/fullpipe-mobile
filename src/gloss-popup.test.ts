@@ -5,7 +5,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createGlossPopup } from "./gloss-popup";
 import { phraseListsFor } from "./paint";
-import { getTaps, phraseTapKey } from "./store";
+import { getLookups, getTaps, phraseTapKey } from "./store";
 import type { Definitions, Token } from "./types";
 
 beforeEach(() => localStorage.clear());
@@ -141,5 +141,25 @@ describe("gloss popup phrase layer", () => {
     pop.show("騒ぐ", 6, sentence);
     expect(pop.el.querySelector(".gp-phrase .gp-mark")!.textContent).toBe("interest ★");
     expect(pop.el.querySelector(".gp-word .gp-mark")!.textContent).toBe("mark");
+  });
+});
+
+describe("lookups", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("counts every open with what the word was painted as, and never marks", () => {
+    const pop = createGlossPopup({
+      episodeId: "ep1",
+      defs: () => ({}),
+      listOf: (lemma) => (lemma === "犬" ? "confirm" : "none"),
+    });
+    pop.show("犬");
+    pop.show("犬");
+    pop.show("猫");
+    expect(getLookups("ep1")).toEqual({
+      犬: { n: 2, lists: { confirm: 2 } },
+      猫: { n: 1, lists: { none: 1 } },
+    });
+    expect(getTaps("ep1")).toEqual({});
   });
 });

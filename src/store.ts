@@ -19,6 +19,8 @@ import type {
   TapBatch,
   TapEntry,
   TapMark,
+  LookupEntry,
+  LookupList,
   ViewSegment,
 } from "./types";
 
@@ -33,6 +35,7 @@ export interface Settings {
 const K = {
   settings: "fp.settings",
   taps: (ep: string) => `fp.taps.${ep}`,
+  lookups: (ep: string) => `fp.lookups.${ep}`,
   submitted: (ep: string) => `fp.submitted.${ep}`,
   outbox: "fp.outbox",
   prep: (ep: string) => `fp.prep.${ep}`,
@@ -126,6 +129,40 @@ export function getMarkJournal(): Record<string, TapMark> {
 
 export function clearTaps(episodeId: string): void {
   localStorage.removeItem(K.taps(episodeId));
+  localStorage.removeItem(K.lookups(episodeId));
+}
+
+// ---- lookups (popup opens, per episode) ----------------------------------------
+// Tapping a word to read it is not a mark: the word stays wherever it is. But
+// how many times you look a word up before you ✓ it — and whether it was on a
+// list at the time — is the ledger's best hint at when a listed word is really
+// known, so every popup open is counted here (by item key, same keys as the
+// taps store) and rides in the tap batch as `lookups` (cumulative, so a
+// re-sent batch replaces rather than stacks on the server).
+
+export interface LookupCount {
+  n: number;
+  lists: Partial<Record<LookupList, number>>;
+}
+
+export function getLookups(episodeId: string): Record<string, LookupCount> {
+  return read(K.lookups(episodeId), {});
+}
+
+export function recordLookup(episodeId: string, key: string, list: LookupList): void {
+  const all = getLookups(episodeId);
+  const cur = all[key] ?? { n: 0, lists: {} };
+  cur.n += 1;
+  cur.lists[list] = (cur.lists[list] ?? 0) + 1;
+  all[key] = cur;
+  write(K.lookups(episodeId), all);
+}
+
+/** The wire form of the episode's lookups (empty when nothing was opened). */
+export function lookupEntries(episodeId: string): LookupEntry[] {
+  return Object.entries(getLookups(episodeId)).map(([k, c]) =>
+    isPhraseTapKey(k) ? [phraseFromTapKey(k), c.n, c.lists, "phrase"] : [k, c.n, c.lists],
+  );
 }
 
 // ---- submitted baseline (what the last submit froze) --------------------------
@@ -197,6 +234,8 @@ export function submitTaps(episodeId: string): TapBatch {
   const taps = getTaps(episodeId);
   const entries = Object.entries(taps).map(([k, m]) => tapEntry(k, m));
   const batch: TapBatch = { episode_id: episodeId, batch_id: newId(), taps: entries };
+  const lookups = lookupEntries(episodeId);
+  if (lookups.length) batch.lookups = lookups;
   const action: OutboxAction = { id: newId(), kind: "taps", batch };
   const outbox = getOutbox();
   const stale = outbox.findIndex((a) => a.kind === "taps" && a.batch.episode_id === episodeId);
