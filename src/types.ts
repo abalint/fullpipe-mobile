@@ -264,8 +264,10 @@ export interface ConfirmCandidate {
   episode_spread: number;
   seen_active?: number; // times seen: occurrences × player plays over watched episodes
   seen_passive?: number; // times heard on the Listen tab (counted apart, never feeds θ)
+  seen_by_mode?: Partial<Record<EncounterMode | "unknown", number>> | null; // times seen split by subtitle state
   lookups?: number; // popup opens with no mark, all episodes
   lookups_listed?: number; // …of which while the word sat on a list
+  confirm_score?: number | null; // the adaptive scorer's P(known), once fitted
   episodes: string[]; // watched-episode titles it turned up in
   senses?: DictEntry[]; // JMdict glosses (word/phrase), when jmdict.db exists
   // grammar rows only:
@@ -291,19 +293,35 @@ export type TapMark = "k" | "h" | "u";
 
 /** One mark: [lemma, mark] for a word, [headword, mark, "phrase"] for a
     multi-word expression marked from the popup's phrase layer (the server
-    records it on the phrase item, never on the words inside it). */
-export type TapEntry = [string, TapMark] | [string, TapMark, "phrase"];
+    records it on the phrase item, never on the words inside it). A fourth
+    element carries what the item was painted as when the mark was made
+    ("" kind = word) — the ledger stores it with the claim's snapshot. */
+export type TapEntry =
+  | [string, TapMark]
+  | [string, TapMark, "phrase"]
+  | [string, TapMark, "phrase" | "", LookupList]
+  | [string, TapMark, "phrase" | "", LookupList | "", EncounterMode];
 
 /** What a word was painted as when its popup opened: a list (blue
     think-you-know / ★ interest / green should-know), plain known, or nothing. */
 export type LookupList = "confirm" | "interest" | "should_know" | "known" | "none";
+
+/** The player's subtitle state: full subs, keyword lines only, hidden, or the
+    🎧 audio handoff (screen off). Seconds per state ride on a sitting. */
+export type SubState = "on" | "kw" | "off" | "audio";
+
+/** Where a word was met when it was looked up or marked: a player state,
+    the Listen tab, a 5ch page, the prep doc. */
+export type EncounterMode = SubState | "listen" | "page" | "prep";
 
 /** One item's popup opens in an episode, cumulative: [key, n, {list: n}] for
     a word, with a trailing "phrase" for a phrase-layer headword. Sent whole
     with every batch; the server replaces the row rather than stacking. */
 export type LookupEntry =
   | [string, number, Partial<Record<LookupList, number>>]
-  | [string, number, Partial<Record<LookupList, number>>, "phrase"];
+  | [string, number, Partial<Record<LookupList, number>>, "phrase"]
+  | [string, number, Partial<Record<LookupList, number>>, "phrase" | "",
+     Partial<Record<EncounterMode, number>>];
 
 export interface TapBatch {
   episode_id: string;
@@ -362,6 +380,9 @@ export interface ViewSegment {
   reached: number;
   duration: number | null;
   source?: ViewSource;
+  /** Seconds per subtitle state within the sitting (player sittings; the
+      🎧 handoff's service segments are stamped `audio` on import). */
+  modes?: Partial<Record<SubState, number>>;
 }
 
 /** One queued offline action. The outbox is FIFO (an episode's taps flush

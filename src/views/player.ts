@@ -480,7 +480,10 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   // seeks re-anchor, rewinds count again, and the sitting closes on leave —
   // or on the 🎧 handoff, after which the native service logs it (still as
   // watching: audio-only here is not the passive queue)
-  const recorder = new ViewRecorder({ episodeId, title: title || episodeId, kind: "watch" });
+  const recorder = new ViewRecorder({
+    episodeId, title: title || episodeId, kind: "watch",
+    state: () => getSubMode(), // the 🎧 handoff closes this recorder; the service's time is `audio`
+  });
 
   const stage = el("div", "player-stage");
   const video = el("video") as HTMLVideoElement;
@@ -503,6 +506,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     listOf: (lemma, ti, sentence) =>
       lookupListOf(lemma, lists, !!(ti != null && sentence?.tokens?.[ti]?.k)),
     onLookup: () => scheduleTapSync(episodeId),
+    mode: () => (audioMode ? "audio" : getSubMode()),
   });
   stage.append(video, overlay, popup.el);
 

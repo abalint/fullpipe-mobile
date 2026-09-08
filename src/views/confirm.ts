@@ -60,6 +60,7 @@ export function reviewCard(c: ConfirmCandidate, actions: CardAction[],
     : c.seen_active ? `seen ${c.seen_active}× in ${eps}` : `seen in ${eps}`;
   if (c.seen_passive) seen += ` · ${c.seen_passive}× passive`;
   if (c.lookups) seen += ` · looked up ${c.lookups}×`;
+  if (c.confirm_score != null) seen += ` · ${Math.round(c.confirm_score * 100)}% likely known`;
   head.appendChild(el("span", "cc-seen", seen));
   card.appendChild(head);
 

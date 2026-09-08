@@ -119,6 +119,7 @@ export function readerView(episodeId: string): HTMLElement {
     listOf: (lemma, ti, sentence) =>
       lookupListOf(lemma, lists, !!(ti != null && sentence?.tokens?.[ti]?.k)),
     onLookup: () => scheduleTapSync(episodeId),
+    mode: () => "page",
     extraClass: "fixed",
   });
   root.appendChild(popup.el);

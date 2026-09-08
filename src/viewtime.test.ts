@@ -101,6 +101,18 @@ describe("ViewRecorder", () => {
     expect(getOpenViewSegment()).toBeNull();
   });
 
+  it("splits a sitting's seconds by subtitle state", () => {
+    let state: "on" | "kw" | "off" = "on";
+    const r = new ViewRecorder({ ...opts, state: () => state });
+    play(r, 0, 4);
+    state = "off";
+    play(r, 4.25, 10);
+    expect(r.current!.modes!.on).toBeCloseTo(4, 5);
+    expect(r.current!.modes!.off).toBeCloseTo(6, 5);
+    r.close();
+    expect(getViewLog()[0].modes).toEqual({ on: 4, off: 6 });
+  });
+
   it("a rewind counts the rewatched stretch again; a seek counts nothing", () => {
     const r = new ViewRecorder(opts);
     play(r, 0, 10); // 10 s

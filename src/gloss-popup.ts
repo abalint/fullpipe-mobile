@@ -19,6 +19,7 @@ import { rubyWord, segsNode } from "./prep-render";
 import { cycleTap, getTaps, phraseTapKey, recordLookup } from "./store";
 import type {
   Definitions,
+  EncounterMode,
   GlossEntry,
   LookupList,
   Segs,
@@ -66,6 +67,10 @@ export interface GlossPopupOptions {
   listOf?(lemma: string, ti?: number, sentence?: PopupSentence): LookupList;
   /** Fired after an open is recorded, so the host can schedule the sync. */
   onLookup?(): void;
+  /** Where the word is being met right now — the player's subtitle state
+      (on / kw / off / audio), "page" in the reader. Stored with every
+      lookup and mark. */
+  mode?(): EncounterMode;
   /** Extra class on the card — "fixed" pins it above the bottom nav (the
       reader's scrolling page has no stage to anchor to). */
   extraClass?: string;
@@ -126,13 +131,13 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
       store.ts phraseTapKey). `standing` is the ledger's ★ when the phone has
       no mark of its own, so the label reads "interest ★" and the next tap
       is the ✓ that graduates it. */
-  const markButton = (key: string, standing: boolean): HTMLButtonElement => {
+  const markButton = (key: string, standing: boolean, painted?: LookupList): HTMLButtonElement => {
     const local = getTaps(opts.episodeId)[key];
     const shown = local === undefined && standing ? "h" : local;
     const mark = el("button", "gp-mark", markLabel(shown)) as HTMLButtonElement;
     mark.addEventListener("click", (e) => {
       e.stopPropagation();
-      mark.textContent = markLabel(cycleTap(opts.episodeId, key));
+      mark.textContent = markLabel(cycleTap(opts.episodeId, key, painted, opts.mode?.()));
       opts.onMarkChanged?.();
     });
     return mark;
@@ -167,7 +172,11 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
     head.appendChild(el("span", "gp-tag", "phrase"));
     head.appendChild(rubyWord(p.canonical, defs[p.canonical]?.[0]?.r[0]));
     const lists = opts.phrases?.() ?? NO_PHRASES;
-    head.appendChild(markButton(phraseTapKey(p.canonical), lists.interest.has(p.canonical)));
+    const phrasePainted: LookupList = lists.known.has(p.canonical) ? "known"
+      : lists.confirm.has(p.canonical) ? "confirm"
+      : lists.interest.has(p.canonical) ? "interest" : "none";
+    head.appendChild(markButton(phraseTapKey(p.canonical), lists.interest.has(p.canonical),
+      phrasePainted));
     layer.appendChild(head);
     if (p.surface && p.surface !== p.canonical) {
       const row = el("div", "gp-inflect");
@@ -183,8 +192,10 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
   };
 
   const show = (lemma: string, ti?: number, sentence?: PopupSentence) => {
-    // a look-up is counted, never judged: the word keeps its lists and status
-    recordLookup(opts.episodeId, lemma, opts.listOf?.(lemma, ti, sentence) ?? "none");
+    // a look-up is counted, never judged: the word keeps its lists and status;
+    // the same paint rides on a mark made from this popup (cycleTap)
+    const painted: LookupList = opts.listOf?.(lemma, ti, sentence) ?? "none";
+    recordLookup(opts.episodeId, lemma, painted, opts.mode?.());
     opts.onLookup?.();
     const info = opts.keywords?.().get(lemma);
     const defs = opts.defs();
@@ -218,7 +229,7 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
     const head = el("div", "gp-head");
     if (covering.length) head.appendChild(el("span", "gp-tag", "word"));
     head.appendChild(rubyWord(lemma, info?.entry.reading ?? entries[0]?.r[0]));
-    head.appendChild(markButton(lemma, !!opts.interest?.().has(lemma)));
+    head.appendChild(markButton(lemma, !!opts.interest?.().has(lemma), painted));
     word.appendChild(head);
     // how the tapped word is conjugated HERE — deterministic from the
     // token chain (inflection.ts), so it works on every line, not just

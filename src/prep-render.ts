@@ -170,7 +170,7 @@ export function renderPrep(doc: PrepDoc, opts: PrepRenderOptions = {}): HTMLElem
     }
     const w = target.closest<HTMLElement>(".w[data-lemma]");
     if (w) {
-      cycleTap(epId, w.dataset.lemma!);
+      cycleTap(epId, w.dataset.lemma!, undefined, "prep");
       refreshTapClasses();
     }
   });

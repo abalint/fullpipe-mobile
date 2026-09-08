@@ -18,7 +18,7 @@ import {
   recordViewSegment,
   setOpenViewSegment,
 } from "./store";
-import type { ViewKind, ViewSegment, ViewSource } from "./types";
+import type { SubState, ViewKind, ViewSegment, ViewSource } from "./types";
 
 // --- calendar ---------------------------------------------------------------
 
@@ -57,6 +57,10 @@ export interface RecorderOpts {
   episodeId: string;
   title: string;
   kind: ViewKind;
+  /** The subtitle state right now — each counted tick's seconds land under
+      it (segment.modes), so a sitting says how much was watched with subs
+      on, keyword-only, or off. */
+  state?: () => SubState;
   now?: () => Date; // injectable clock (tests: midnight rollover)
 }
 
@@ -96,7 +100,13 @@ export class ViewRecorder {
         duration: null,
       };
     }
-    this.seg.secs += delta / (rate > 0 ? rate : 1);
+    const secs = delta / (rate > 0 ? rate : 1);
+    this.seg.secs += secs;
+    const state = this.opts.state?.();
+    if (state) {
+      this.seg.modes = this.seg.modes ?? {};
+      this.seg.modes[state] = (this.seg.modes[state] ?? 0) + secs;
+    }
     if (pos > this.seg.reached) this.seg.reached = pos;
     if (duration != null && Number.isFinite(duration) && duration > 0) this.seg.duration = duration;
     this.sinceCheckpoint += delta;
@@ -121,8 +131,12 @@ export class ViewRecorder {
     this.lastPos = null;
     this.sinceCheckpoint = 0;
     setOpenViewSegment(null);
-    if (seg && seg.secs >= 1)
-      recordViewSegment({ ...seg, secs: round1(seg.secs), reached: round1(seg.reached) });
+    if (seg && seg.secs >= 1) {
+      const modes = seg.modes &&
+        Object.fromEntries(Object.entries(seg.modes).map(([k, v]) => [k, round1(v as number)]));
+      recordViewSegment({ ...seg, secs: round1(seg.secs), reached: round1(seg.reached),
+        ...(modes ? { modes } : {}) });
+    }
   }
 
   /** The in-progress segment (tests / diagnostics). */
@@ -155,7 +169,12 @@ export async function importListenLog(): Promise<{ added: number; open: ViewSegm
   }
   let added = 0;
   if (entries?.length) {
-    for (const e of entries) if (recordViewSegment(e)) added++;
+    // a service segment of kind "watch" is the player's 🎧 handoff: screen
+    // off, no subtitles — its whole time is the `audio` state
+    for (const e of entries) {
+      const seg = e.kind === "watch" && !e.modes ? { ...e, modes: { audio: e.secs } } : e;
+      if (recordViewSegment(seg)) added++;
+    }
     try {
       await PassiveAudio.clearListenLog({ ids: entries.map((e) => e.id) });
     } catch {

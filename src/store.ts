@@ -21,6 +21,7 @@ import type {
   TapMark,
   LookupEntry,
   LookupList,
+  EncounterMode,
   ViewSegment,
 } from "./types";
 
@@ -36,6 +37,7 @@ const K = {
   settings: "fp.settings",
   taps: (ep: string) => `fp.taps.${ep}`,
   lookups: (ep: string) => `fp.lookups.${ep}`,
+  markctx: (ep: string) => `fp.markctx.${ep}`,
   submitted: (ep: string) => `fp.submitted.${ep}`,
   outbox: "fp.outbox",
   prep: (ep: string) => `fp.prep.${ep}`,
@@ -87,9 +89,27 @@ export const phraseTapKey = (canonical: string): string => PHRASE_TAP_PREFIX + c
 export const isPhraseTapKey = (key: string): boolean => key.startsWith(PHRASE_TAP_PREFIX);
 export const phraseFromTapKey = (key: string): string => key.slice(PHRASE_TAP_PREFIX.length);
 
-/** The wire entry for one stored mark. */
-export function tapEntry(key: string, mark: TapMark): TapEntry {
-  return isPhraseTapKey(key) ? [phraseFromTapKey(key), mark, "phrase"] : [key, mark];
+/** What a mark was made on: the item's paint at the time and where it was
+    met (subtitle state / page / prep). */
+export interface MarkContext {
+  painted?: LookupList;
+  mode?: EncounterMode;
+}
+
+/** The wire entry for one stored mark, with its MarkContext when known. */
+export function tapEntry(key: string, mark: TapMark, ctx?: MarkContext): TapEntry {
+  const phrase = isPhraseTapKey(key);
+  const lemma = phrase ? phraseFromTapKey(key) : key;
+  const kind = phrase ? "phrase" : "";
+  if (ctx?.mode) return [lemma, mark, kind, ctx.painted ?? "", ctx.mode];
+  if (ctx?.painted) return [lemma, mark, kind, ctx.painted];
+  return phrase ? [lemma, mark, "phrase"] : [lemma, mark];
+}
+
+/** Each marked item's context at its latest mark — the popup passes paint
+    and state through cycleTap; the prep doc's plain taps say "prep". */
+export function getMarkContext(episodeId: string): Record<string, MarkContext> {
+  return read(K.markctx(episodeId), {});
 }
 
 export function getTaps(episodeId: string): Record<string, TapMark> {
@@ -97,8 +117,19 @@ export function getTaps(episodeId: string): Record<string, TapMark> {
 }
 
 /** The mark cycle: (none) → ✓ known → ★ interest → ✗ unknown → (none). */
-export function cycleTap(episodeId: string, lemma: string): TapMark | undefined {
+export function cycleTap(
+  episodeId: string,
+  lemma: string,
+  painted?: LookupList,
+  mode?: EncounterMode,
+): TapMark | undefined {
   const taps = getTaps(episodeId);
+  if (painted || mode) {
+    const ctx: MarkContext = {};
+    if (painted) ctx.painted = painted;
+    if (mode) ctx.mode = mode;
+    write(K.markctx(episodeId), { ...getMarkContext(episodeId), [lemma]: ctx });
+  }
   if (taps[lemma] === "k") taps[lemma] = "h";
   else if (taps[lemma] === "h") taps[lemma] = "u";
   else if (taps[lemma] === "u") delete taps[lemma];
@@ -130,6 +161,7 @@ export function getMarkJournal(): Record<string, TapMark> {
 export function clearTaps(episodeId: string): void {
   localStorage.removeItem(K.taps(episodeId));
   localStorage.removeItem(K.lookups(episodeId));
+  localStorage.removeItem(K.markctx(episodeId));
 }
 
 // ---- lookups (popup opens, per episode) ----------------------------------------
@@ -143,26 +175,39 @@ export function clearTaps(episodeId: string): void {
 export interface LookupCount {
   n: number;
   lists: Partial<Record<LookupList, number>>;
+  modes?: Partial<Record<EncounterMode, number>>; // where it was met at each open
 }
 
 export function getLookups(episodeId: string): Record<string, LookupCount> {
   return read(K.lookups(episodeId), {});
 }
 
-export function recordLookup(episodeId: string, key: string, list: LookupList): void {
+export function recordLookup(
+  episodeId: string,
+  key: string,
+  list: LookupList,
+  mode?: EncounterMode,
+): void {
   const all = getLookups(episodeId);
   const cur = all[key] ?? { n: 0, lists: {} };
   cur.n += 1;
   cur.lists[list] = (cur.lists[list] ?? 0) + 1;
+  if (mode) {
+    cur.modes = cur.modes ?? {};
+    cur.modes[mode] = (cur.modes[mode] ?? 0) + 1;
+  }
   all[key] = cur;
   write(K.lookups(episodeId), all);
 }
 
 /** The wire form of the episode's lookups (empty when nothing was opened). */
 export function lookupEntries(episodeId: string): LookupEntry[] {
-  return Object.entries(getLookups(episodeId)).map(([k, c]) =>
-    isPhraseTapKey(k) ? [phraseFromTapKey(k), c.n, c.lists, "phrase"] : [k, c.n, c.lists],
-  );
+  return Object.entries(getLookups(episodeId)).map(([k, c]) => {
+    const phrase = isPhraseTapKey(k);
+    const lemma = phrase ? phraseFromTapKey(k) : k;
+    if (c.modes) return [lemma, c.n, c.lists, phrase ? "phrase" : "", c.modes];
+    return phrase ? [lemma, c.n, c.lists, "phrase"] : [lemma, c.n, c.lists];
+  });
 }
 
 // ---- submitted baseline (what the last submit froze) --------------------------
@@ -232,7 +277,8 @@ export function actionEpisode(a: OutboxAction): string {
     ("no corrections — default selection"). */
 export function submitTaps(episodeId: string): TapBatch {
   const taps = getTaps(episodeId);
-  const entries = Object.entries(taps).map(([k, m]) => tapEntry(k, m));
+  const painted = getMarkContext(episodeId);
+  const entries = Object.entries(taps).map(([k, m]) => tapEntry(k, m, painted[k]));
   const batch: TapBatch = { episode_id: episodeId, batch_id: newId(), taps: entries };
   const lookups = lookupEntries(episodeId);
   if (lookups.length) batch.lookups = lookups;

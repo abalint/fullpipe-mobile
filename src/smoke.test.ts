@@ -30,6 +30,8 @@ import {
   getLookups,
   phraseTapKey,
   clearTaps,
+  cycleTap,
+  getMarkContext,
 } from "./store";
 import { flushOutbox } from "./sync";
 import { api, ApiError } from "./api";
@@ -121,21 +123,36 @@ describe("rubyWord", () => {
 
 describe("outbox", () => {
   it("carries the episode's popup lookups in the batch, cumulative, and clears them at close-out", () => {
-    recordLookup(ep, "犬", "should_know");
-    recordLookup(ep, "犬", "none");
+    recordLookup(ep, "犬", "should_know", "on");
+    recordLookup(ep, "犬", "none", "kw");
     recordLookup(ep, phraseTapKey("気を付ける"), "interest");
     let batch = submitTaps(ep);
     expect(batch.lookups).toEqual([
-      ["犬", 2, { should_know: 1, none: 1 }],
+      ["犬", 2, { should_know: 1, none: 1 }, "", { on: 1, kw: 1 }],
       ["気を付ける", 1, { interest: 1 }, "phrase"],
     ]);
     expect(batch.taps).toEqual([]);
-    recordLookup(ep, "犬", "none");
+    recordLookup(ep, "犬", "none", "kw");
     batch = submitTaps(ep);
-    expect(batch.lookups![0]).toEqual(["犬", 3, { should_know: 1, none: 2 }]);
+    expect(batch.lookups![0]).toEqual(["犬", 3, { should_know: 1, none: 2 }, "", { on: 1, kw: 2 }]);
     clearTaps(ep);
     expect(getLookups(ep)).toEqual({});
     expect(submitTaps(ep).lookups).toBeUndefined();
+  });
+
+  it("tags a popup mark with what the word was painted as and where it was met", () => {
+    cycleTap(ep, "犬", "confirm", "off"); // ✓ on a blue word, subs hidden
+    cycleTap(ep, "猫"); // no context at all
+    cycleTap(ep, "鳥", undefined, "prep"); // prep-doc tap: no paint, but a place
+    cycleTap(ep, phraseTapKey("気を付ける"), "interest");
+    expect(submitTaps(ep).taps).toEqual([
+      ["犬", "k", "", "confirm", "off"],
+      ["猫", "k"],
+      ["鳥", "k", "", "", "prep"],
+      ["気を付ける", "k", "phrase", "interest"],
+    ]);
+    clearTaps(ep);
+    expect(getMarkContext(ep)).toEqual({});
   });
 
   it("freezes taps into a batch but retains the marks as a submitted baseline", () => {
