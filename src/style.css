@@ -486,6 +486,11 @@ details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: po
 .subs-overlay .w.hl-sk { background: none; color: #7ee787; }    /* green: should know */
 /* phrase spans paint as one word in the phrase's state (player.ts
    paintTaps) — the same hues as above, no separate underline */
+/* a grammar unit (the てしまっ of 食べてしまった — GRAMMAR.md, token-anchored
+   units) paints in the same hues from the PATTERN's state, with a dotted
+   underline so an attachment reads apart from a word in the same colour;
+   known paints nothing, like a word */
+.subs-overlay .w.gr { text-decoration: underline dotted 1.5px currentColor; text-underline-offset: 4px; }
 /* grammar-point-awaiting-confirm line marker: same blue as a think-you-know
    word, same badge shape as +1 */
 .subs-overlay .know-badge {
@@ -534,6 +539,10 @@ details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: po
 .gloss-pop .gp-layer + .gp-layer { margin-top: 8px; padding-top: 8px;
   border-top: 1px solid #444; }
 .gloss-pop .gp-phrase { border-left: 2px solid #c9a7ff; padding-left: 8px; }
+.gloss-pop .gp-grammar { border-left: 2px solid #8fd0ff; padding-left: 8px; }
+.gloss-pop .gp-level { color: #8fd0ff; font-size: .72rem; font-weight: 600;
+                       border: 1px solid #4a86b0; border-radius: 4px; padding: 0 4px; }
+.gloss-pop .gp-line-grammar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .gloss-pop .gp-head .gp-tag { margin-right: 0; }
 .gloss-pop .gp-head { display: flex; align-items: center; gap: 10px;
                       font-size: 1.15rem; font-weight: 600; }

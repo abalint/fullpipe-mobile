@@ -18,6 +18,7 @@ import type {
   Stats,
   TapBatch,
   TapEntry,
+  TapKind,
   TapMark,
   LookupEntry,
   LookupList,
@@ -84,10 +85,24 @@ export function saveSettings(s: Settings): void {
 // submitTaps which entries to send with kind "phrase".
 
 const PHRASE_TAP_PREFIX = "p:";
+// A grammar point (the popup's grammar layer over a detected unit —
+// 〜てしまう under a painted てしまっ) by "g:" + pattern, for the same reason.
+const GRAMMAR_TAP_PREFIX = "g:";
 
 export const phraseTapKey = (canonical: string): string => PHRASE_TAP_PREFIX + canonical;
 export const isPhraseTapKey = (key: string): boolean => key.startsWith(PHRASE_TAP_PREFIX);
 export const phraseFromTapKey = (key: string): string => key.slice(PHRASE_TAP_PREFIX.length);
+export const grammarTapKey = (pattern: string): string => GRAMMAR_TAP_PREFIX + pattern;
+export const isGrammarTapKey = (key: string): boolean => key.startsWith(GRAMMAR_TAP_PREFIX);
+export const grammarFromTapKey = (key: string): string => key.slice(GRAMMAR_TAP_PREFIX.length);
+
+export type TapKeyKind = "word" | "phrase" | "grammar";
+/** Which item a tap-store key names, and the bare key (lemma / headword / pattern). */
+export function splitTapKey(key: string): { kind: TapKeyKind; item: string } {
+  if (isPhraseTapKey(key)) return { kind: "phrase", item: phraseFromTapKey(key) };
+  if (isGrammarTapKey(key)) return { kind: "grammar", item: grammarFromTapKey(key) };
+  return { kind: "word", item: key };
+}
 
 /** What a mark was made on: the item's paint at the time and where it was
     met (subtitle state / page / prep). */
@@ -98,12 +113,11 @@ export interface MarkContext {
 
 /** The wire entry for one stored mark, with its MarkContext when known. */
 export function tapEntry(key: string, mark: TapMark, ctx?: MarkContext): TapEntry {
-  const phrase = isPhraseTapKey(key);
-  const lemma = phrase ? phraseFromTapKey(key) : key;
-  const kind = phrase ? "phrase" : "";
+  const { kind: k, item: lemma } = splitTapKey(key);
+  const kind: TapKind = k === "word" ? "" : k;
   if (ctx?.mode) return [lemma, mark, kind, ctx.painted ?? "", ctx.mode];
   if (ctx?.painted) return [lemma, mark, kind, ctx.painted];
-  return phrase ? [lemma, mark, "phrase"] : [lemma, mark];
+  return kind ? [lemma, mark, kind] : [lemma, mark];
 }
 
 /** Each marked item's context at its latest mark — the popup passes paint
@@ -203,10 +217,10 @@ export function recordLookup(
 /** The wire form of the episode's lookups (empty when nothing was opened). */
 export function lookupEntries(episodeId: string): LookupEntry[] {
   return Object.entries(getLookups(episodeId)).map(([k, c]) => {
-    const phrase = isPhraseTapKey(k);
-    const lemma = phrase ? phraseFromTapKey(k) : k;
-    if (c.modes) return [lemma, c.n, c.lists, phrase ? "phrase" : "", c.modes];
-    return phrase ? [lemma, c.n, c.lists, "phrase"] : [lemma, c.n, c.lists];
+    const { kind: kk, item: lemma } = splitTapKey(k);
+    const kind: TapKind = kk === "word" ? "" : kk;
+    if (c.modes) return [lemma, c.n, c.lists, kind, c.modes];
+    return kind ? [lemma, c.n, c.lists, kind] : [lemma, c.n, c.lists];
   });
 }
 

@@ -1,7 +1,10 @@
 // The any-word gloss popup, shared by the player's subtitle overlay and the
-// page reader. One card in two layers: the PHRASE layer first, when the
-// tapped token sits inside a multi-word expression (血が騒いだ — GRAMMAR.md:
-// its own ledger item, with its own mark, reading and JMdict senses), then
+// page reader. One card in up to three layers: the PHRASE layer first, when
+// the tapped token sits inside a multi-word expression (血が騒いだ — GRAMMAR.md:
+// its own ledger item, with its own mark, reading and JMdict senses), the
+// GRAMMAR layer when it sits inside a detected grammar unit (the てしまっ of
+// 食べてしまった — GRAMMAR.md, token-anchored units: pattern, gloss, JLPT
+// tier, the curate pass's note for this line, and its own mark), then
 // the WORD layer — word + reading, the mark cycle (marks land in the shared
 // tap store), inflection breakdown, compound hits, curated gloss/notes,
 // JMdict senses — and the line's other curated grammar/phrase context at the
@@ -13,14 +16,15 @@
 import { compoundRunsAt } from "./compounds";
 import type { CompoundRun } from "./compounds";
 import { inflectionAt } from "./inflection";
-import { NO_PHRASES, phrasesAt } from "./paint";
-import type { PhraseLists } from "./paint";
+import { grammarAt, NO_GRAMMAR, NO_PHRASES, phrasesAt } from "./paint";
+import type { GrammarLists, PhraseLists } from "./paint";
 import { rubyWord, segsNode } from "./prep-render";
-import { cycleTap, getTaps, phraseTapKey, recordLookup } from "./store";
+import { cycleTap, getTaps, grammarTapKey, phraseTapKey, recordLookup } from "./store";
 import type {
   Definitions,
   EncounterMode,
   GlossEntry,
+  GrammarPoint,
   LookupList,
   Segs,
   SentenceGrammar,
@@ -46,9 +50,11 @@ export interface PopupSentence {
 }
 
 export interface GlossPopupOptions {
-  /** Curated grammar patterns awaiting the user's confirm (paint.ts) — the
-      line note paints them blue. */
-  grammarConfirm?: () => ReadonlySet<string>;
+  /** The grammar axis (paint.ts grammarListsFor) — a pattern known, in the
+      think-you-know queue or starred shows as such in its layer / note. */
+  grammar?: () => GrammarLists;
+  /** Gloss + JLPT tier per pattern (transcript `grammar_points`). */
+  grammarPoints?: () => Record<string, GrammarPoint>;
   /** The standing high-interest set (paint.ts interestFor) — a word starred
       in another episode shows "interest ★" here too; the next tap is ✓. */
   interest?: () => ReadonlySet<string>;
@@ -191,6 +197,43 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
     return layer;
   };
 
+  /** What a grammar pattern is painted as right now (the lookup context). */
+  const grammarPainted = (pattern: string, lists: GrammarLists): LookupList =>
+    lists.known.has(pattern) ? "known"
+      : lists.confirm.has(pattern) ? "confirm"
+      : lists.interest.has(pattern) ? "interest" : "none";
+
+  /** The grammar layer: the pattern as its own item — head (tag, pattern,
+      tier, its own mark), how it surfaces on this line, the curate pass's
+      note for this line, the taxonomy gloss. */
+  const grammarLayer = (g: SentenceGrammar, tokens: Token[]): HTMLElement => {
+    const layer = el("div", "gp-layer gp-grammar");
+    layer.dataset.grammar = g.pattern;
+    const head = el("div", "gp-head");
+    head.appendChild(el("span", "gp-tag", g.proposed ? "grammar?" : "grammar"));
+    head.appendChild(el("span", "gp-pattern", g.pattern));
+    const point = opts.grammarPoints?.()[g.pattern];
+    if (point?.level != null) head.appendChild(el("span", "gp-level", `N${point.level}`));
+    const lists = opts.grammar?.() ?? NO_GRAMMAR;
+    head.appendChild(markButton(grammarTapKey(g.pattern), lists.interest.has(g.pattern),
+      grammarPainted(g.pattern, lists)));
+    layer.appendChild(head);
+    if (g.start != null && g.end != null) {
+      const surface = tokens.slice(g.start, g.end).map((t) => t.s).join("");
+      if (surface && surface !== g.pattern.replace(/^〜/, "")) {
+        const row = el("div", "gp-inflect");
+        row.appendChild(el("span", "gp-surface", surface));
+        row.appendChild(document.createTextNode(" ＝ "));
+        row.appendChild(el("span", "gp-part", g.pattern));
+        layer.appendChild(row);
+      }
+    }
+    if (g.note) layer.appendChild(el("div", "gp-note", g.note));
+    if (point?.gloss) layer.appendChild(el("div", "gp-gloss", point.gloss));
+    else if (!g.note) layer.appendChild(el("div", "gp-none", "no gloss"));
+    return layer;
+  };
+
   const show = (lemma: string, ti?: number, sentence?: PopupSentence) => {
     // a look-up is counted, never judged: the word keeps its lists and status;
     // the same paint rides on a mark made from this popup (cycleTap)
@@ -223,11 +266,15 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
       });
     }
     for (const p of covering) pop.appendChild(phraseLayer(p, defs));
+    // --- grammar layer(s): the unit the tapped token sits inside
+    const units = ti != null ? grammarAt(sentence?.grammar, ti) : [];
+    const inGrammar = new Set(units.map((g) => g.pattern));
+    for (const g of units) pop.appendChild(grammarLayer(g, lineTokens));
 
     // --- word layer
     const word = el("div", "gp-layer gp-word");
     const head = el("div", "gp-head");
-    if (covering.length) head.appendChild(el("span", "gp-tag", "word"));
+    if (covering.length || units.length) head.appendChild(el("span", "gp-tag", "word"));
     head.appendChild(rubyWord(lemma, info?.entry.reading ?? entries[0]?.r[0]));
     head.appendChild(markButton(lemma, !!opts.interest?.().has(lemma), painted));
     word.appendChild(head);
@@ -260,17 +307,22 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
     }
     // dictionary senses
     word.append(...senses(defs, lemma, 2));
-    // the line's curated grammar patterns + the phrases the tap is NOT
-    // inside (GRAMMAR.md) — they belong to the sentence, not one token, so
-    // any word tap surfaces them
+    // the line's other grammar units + the phrases the tap is NOT inside
+    // (GRAMMAR.md) — they belong to the sentence, not one token, so any
+    // word tap surfaces them, each with its own mark
+    const glists = opts.grammar?.() ?? NO_GRAMMAR;
     for (const g of sentence?.grammar ?? []) {
-      const row = el("div", "gp-line-note");
+      if (inGrammar.has(g.pattern)) continue;
+      const row = el("div", "gp-line-note gp-line-grammar");
       row.appendChild(el("span", "gp-tag", g.proposed ? "grammar?" : "grammar"));
       // in the ledger's think-you-know queue → the same blue as a word there
-      const ask = opts.grammarConfirm?.().has(g.pattern);
+      const ask = glists.confirm.has(g.pattern);
       row.appendChild(el("span", `gp-pattern${ask ? " know" : ""}`, g.pattern));
       if (ask) row.appendChild(el("span", "gp-ask", " · think you know this?"));
       if (g.note) row.appendChild(document.createTextNode(` — ${g.note}`));
+      if (!g.proposed)
+        row.appendChild(markButton(grammarTapKey(g.pattern), glists.interest.has(g.pattern),
+          grammarPainted(g.pattern, glists)));
       word.appendChild(row);
     }
     for (const p of sentence?.phrases ?? []) {

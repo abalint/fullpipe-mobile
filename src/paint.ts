@@ -25,8 +25,9 @@
 import { api } from "./api";
 import { confirmList } from "./lists";
 import { compoundRunsAt } from "./compounds";
-import { getMarkJournal, getTaps, isPhraseTapKey, phraseFromTapKey, phraseTapKey } from "./store";
-import type { PaintState, SentencePhrase, TapMark, Token, TranscriptDoc,
+import { getMarkJournal, getTaps, phraseTapKey, splitTapKey } from "./store";
+import type { TapKeyKind } from "./store";
+import type { PaintState, SentenceGrammar, SentencePhrase, TapMark, Token, TranscriptDoc,
   LookupList,
 } from "./types";
 
@@ -61,13 +62,15 @@ export async function fetchPaint(ep: string): Promise<PaintState | null> {
     (store.ts, survives close-out) or any episode's live tap store — so a
     mark made in one show counts everywhere at once, before it has even
     synced. */
-function locallyMarked(mark: TapMark, phrases = false): Set<string> {
+function locallyMarked(mark: TapMark, kind: TapKeyKind = "word"): Set<string> {
   const out = new Set<string>();
-  // word marks and phrase marks share the stores but never the paint: a
-  // phrase key ("p:" + headword, store.ts) only ever paints its span
+  // word, phrase and grammar marks share the stores but never the paint: a
+  // phrase key ("p:" + headword) or grammar key ("g:" + pattern, store.ts)
+  // only ever paints its own span
   const take = (key: string, m: string) => {
-    if (m !== mark || isPhraseTapKey(key) !== phrases) return;
-    out.add(phrases ? phraseFromTapKey(key) : key);
+    const { kind: k, item } = splitTapKey(key);
+    if (m !== mark || k !== kind) return;
+    out.add(item);
   };
   // the journal holds the LATEST mark per key, so it outranks a stale mark
   // still sitting in an unfinished episode's store (✓ there, ✗ since)
@@ -128,15 +131,69 @@ export const NO_PHRASES: PhraseLists = {
     axis) plus this phone's own phrase marks; a ✓ retires a ★, and a
     graduation to blue or known ends a stale local ★. */
 export function phraseListsFor(state: PaintState | null): PhraseLists {
-  const known = locallyMarked("k", true);
+  const known = locallyMarked("k", "phrase");
   for (const p of state?.phrase_known ?? []) known.add(p);
-  for (const p of locallyMarked("u", true)) known.delete(p);
+  for (const p of locallyMarked("u", "phrase")) known.delete(p);
   const confirm = new Set(state?.phrase_confirm ?? []);
-  const interest = locallyMarked("h", true);
+  const interest = locallyMarked("h", "phrase");
   for (const p of state?.phrase_interest ?? []) interest.add(p);
   for (const p of known) interest.delete(p);
   for (const p of confirm) interest.delete(p);
   return { known, confirm, interest, live: state?.phrase_known != null };
+}
+
+// ---- grammar: the third axis ---------------------------------------------------
+// A grammar point (GRAMMAR.md — token-anchored units) is its own ledger item
+// too: 〜てしまう can be unknown while 食べる and て are known. The server
+// places each pattern's span on the line (the attachment's tokens), and the
+// span paints from the PATTERN's state — a local mark, else the live paint
+// state's grammar lists, else the sidecar's status snapshot. The same
+// PhraseLists shape serves, since the rules are the same.
+
+export type GrammarLists = PhraseLists;
+export const NO_GRAMMAR: GrammarLists = NO_PHRASES;
+
+/** Grammar paint lists: the server's (when the paint state carries the
+    grammar axis) plus this phone's own grammar marks; a ✓ retires a ★, a
+    ✗ takes the pattern back out of known, and graduation to the queue or
+    to known ends a stale local ★. */
+export function grammarListsFor(state: PaintState | null): GrammarLists {
+  const known = locallyMarked("k", "grammar");
+  for (const g of state?.grammar_known ?? []) known.add(g);
+  for (const g of locallyMarked("u", "grammar")) known.delete(g);
+  for (const g of state?.grammar_unknown ?? []) if (!locallyMarked("k", "grammar").has(g)) known.delete(g);
+  const confirm = new Set(state?.grammar_confirm ?? []);
+  for (const g of known) confirm.delete(g);
+  const interest = locallyMarked("h", "grammar");
+  for (const g of state?.grammar_interest ?? []) interest.add(g);
+  for (const g of known) interest.delete(g);
+  for (const g of confirm) interest.delete(g);
+  return { known, confirm, interest, live: state?.grammar_known != null };
+}
+
+/** A grammar unit's paint state — the same four states as a phrase
+    (phraseClass), read off the pattern: local mark › live lists › the
+    sidecar's status snapshot › unknown. */
+export function grammarClass(
+  g: SentenceGrammar,
+  mark: TapMark | undefined,
+  lists: GrammarLists,
+): "ph-known" | "ph-know" | "ph-int" | "ph-unk" {
+  if (mark === "k") return "ph-known";
+  if (mark === "h") return "ph-int";
+  if (mark === "u") return "ph-unk";
+  if (lists.known.has(g.pattern)) return "ph-known";
+  if (lists.confirm.has(g.pattern)) return "ph-know";
+  if (lists.interest.has(g.pattern)) return "ph-int";
+  if (!lists.live && g.status === "known") return "ph-known";
+  return "ph-unk";
+}
+
+/** The grammar units whose token span covers token `ti` (placed units
+    only — a curate-tagged pattern without a span is a line note). */
+export function grammarAt(grammar: SentenceGrammar[] | undefined, ti: number): SentenceGrammar[] {
+  return (grammar ?? []).filter((g) =>
+    g.start != null && g.end != null && ti >= g.start && ti < g.end);
 }
 
 export function samePhraseLists(a: PhraseLists, b: PhraseLists): boolean {

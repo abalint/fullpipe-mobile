@@ -38,9 +38,13 @@ import {
   applyPaintKnown,
   fetchPaint,
   getCachedPaint,
+  grammarAt,
+  grammarClass,
+  grammarListsFor,
   listClass,
   listsFor,
   lookupListOf,
+  NO_GRAMMAR,
   NO_LISTS,
   paintsInterest,
   phraseClass,
@@ -48,10 +52,10 @@ import {
   phraseToPaint,
   NO_PHRASES,
 } from "../paint";
-import type { ListSnapshot, PaintLists, PhraseLists } from "../paint";
+import type { GrammarLists, ListSnapshot, PaintLists, PhraseLists } from "../paint";
 import { tokenSpan } from "../prep-render";
 import { epLabel, nextEpisode } from "../series";
-import { autoplayNext, cachePrep, getCachedJobs, getCachedPrep, getTaps, phraseTapKey } from "../store";
+import { autoplayNext, cachePrep, getCachedJobs, getCachedPrep, getTaps, grammarTapKey, phraseTapKey } from "../store";
 import { onTapSync, scheduleTapSync } from "../livesync";
 import { ViewRecorder } from "../viewtime";
 import {
@@ -65,6 +69,7 @@ import {
   savePosition,
 } from "../video";
 import type {
+  GrammarPoint,
   Definitions,
   PaintState,
   PrepDoc,
@@ -383,9 +388,12 @@ export function keywordIndex(doc: PrepDoc | null): Map<string, KeywordInfo> {
   return map;
 }
 
-/** Curated grammar patterns on this cue that sit in the confirm queue. */
+/** Grammar patterns on this cue that sit in the confirm queue and have no
+    span to paint (curate-only tags) — the line badge covers those; a
+    placed unit paints its own span blue instead. */
 export function cueGrammarConfirm(c: Cue, grammarConfirm: ReadonlySet<string>): string[] {
-  return (c.grammar ?? []).map((g) => g.pattern).filter((p) => grammarConfirm.has(p));
+  return (c.grammar ?? []).filter((g) => g.start == null)
+    .map((g) => g.pattern).filter((p) => grammarConfirm.has(p));
 }
 
 /** kw-mode gate: does this line carry a noted keyword or a ★ word (marked
@@ -420,6 +428,7 @@ async function loadTokenCues(
   candidates: string[];
   snapshot: ListSnapshot; // the sidecar's copy of the global lists
   curated: boolean;
+  grammarPoints: Record<string, GrammarPoint>; // gloss + tier per pattern on any line
 } | null> {
   const snap = (d: ListSnapshot): ListSnapshot => ({
     confirm: d.confirm,
@@ -433,6 +442,7 @@ async function loadTokenCues(
       candidates: local.candidates ?? [],
       snapshot: snap(local),
       curated: local.curated ?? false,
+      grammarPoints: local.grammar_points ?? {},
     };
   try {
     const doc = await api.getTranscript(ep);
@@ -442,6 +452,7 @@ async function loadTokenCues(
         candidates: doc.candidates ?? [],
         snapshot: snap(doc),
         curated: true,
+        grammarPoints: doc.grammar_points ?? {},
       };
   } catch {
     /* endpoint missing / unreachable — fall through to SRT */
@@ -494,7 +505,8 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     episodeId,
     defs: () => defs,
     keywords: () => keywords,
-    grammarConfirm: () => grammarConfirm,
+    grammar: () => grammarLists,
+    grammarPoints: () => grammarPoints,
     interest: () => lists.interest,
     phrases: () => phraseLists,
     // a watch-time mark syncs on its own (livesync.ts) — nothing to submit
@@ -520,8 +532,12 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   // the phrase axis (paint.ts): each curated phrase span paints from its own
   // state, never its tokens' — the words-known / phrase-unknown gap shows
   let phraseLists: PhraseLists = NO_PHRASES;
+  // the grammar axis (paint.ts): each detected unit paints from the
+  // pattern's own state — 〜てしまう can be unknown while 食べる and て are known
+  let grammarLists: GrammarLists = NO_GRAMMAR;
+  let grammarPoints: Record<string, GrammarPoint> = {};
   let snapshot: ListSnapshot = {};
-  // curated line patterns in the grammar half of the confirm queue (line badge)
+  // curate-only line patterns (no span) in the confirm queue (line badge)
   let grammarConfirm: ReadonlySet<string> = NO_CONFIRM;
   // paint.ts: the ledger's lists as of now, overlaid on the cached sidecar
   // (known is additive; the lists and grammar replace the snapshot)
@@ -531,7 +547,8 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     applyPaintKnown(cues, paint);
     lists = listsFor(paint, doc);
     phraseLists = phraseListsFor(paint);
-    grammarConfirm = new Set(paint?.grammar_confirm ?? []);
+    grammarLists = grammarListsFor(paint);
+    grammarConfirm = grammarLists.confirm;
   };
   const fallbackHighValue = (doc: PrepDoc | null) => {
     if (!highValue.size && doc) highValue = new Set(doc.glossary.map((g) => g.lemma));
@@ -674,7 +691,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       lists are recomputed (a ★ takes a word from green to purple, a ✓ ends
       both), each word's highlight is re-derived, and the tap classes layered
       on top. Keeps the span elements, so an open popup stays anchored. */
-  const HL_CLASSES = ["hl-know", "hl-int", "hl-sk", "kw", "hl-hv", "hl-target", "hl-unk"];
+  const HL_CLASSES = ["hl-know", "hl-int", "hl-sk", "kw", "hl-hv", "hl-target", "hl-unk", "gr"];
   // a phrase span paints like ONE word in the phrase's state (user rule,
   // 2026-09-05: no separate underline) — its tokens take the word hues
   const PHRASE_HL: Record<string, string | null> = {
@@ -684,6 +701,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     const taps = getTaps(episodeId);
     lists = listsFor(paint, snapshot);
     phraseLists = phraseListsFor(paint);
+    grammarLists = grammarListsFor(paint);
     const c = current >= 0 ? cues[current] : undefined;
     const tier = getSubTier();
     const target = c ? soleUnknown(c) : null;
@@ -710,6 +728,23 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
         return;
       }
       delete w.dataset.phrase;
+      // the grammar unit this token sits in (GRAMMAR.md — token-anchored
+      // units) paints from the PATTERN's state, in the word hues plus a
+      // dotted underline that says "attachment, not a word": the てしまっ
+      // of 食べてしまった goes blue when 〜てしまう is in the think-you-know
+      // queue, whatever 食べる is painted
+      const g = ti != null && tier !== "off" ? grammarAt(c?.grammar, ti)[0] : undefined;
+      if (g) {
+        const gmark = taps[grammarTapKey(g.pattern)];
+        const hl = PHRASE_HL[grammarClass(g, gmark, grammarLists)];
+        if (hl && (hl !== "hl-unk" || tier === "learn")) w.classList.add(hl, "gr");
+        w.classList.toggle("tap-k", gmark === "k");
+        w.classList.toggle("tap-h", gmark === "h");
+        w.classList.toggle("tap-u", gmark === "u");
+        w.dataset.grammar = g.pattern;
+        return;
+      }
+      delete w.dataset.grammar;
       if (t) {
         const hl = tokenHighlight(t, tier, keywords, highValue, target, c!.cls, lists);
         if (hl) w.classList.add(hl);
@@ -836,6 +871,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
       if (tokenized) {
         cues = extendCues(tokenized.cues);
         highValue = new Set(tokenized.candidates);
+        grammarPoints = tokenized.grammarPoints;
         applyPaint(tokenized.snapshot);
         fallbackHighValue(getCachedPrep(episodeId));
         // then the live lists: what's become known / entered a list since

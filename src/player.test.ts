@@ -461,8 +461,8 @@ describe("playerView subtitle overlay", () => {
     const pop = root.querySelector<HTMLElement>(".gloss-pop")!;
     const notes = [...pop.querySelectorAll(".gp-line-note")].map((n) => n.textContent);
     expect(notes).toEqual([
-      "grammar〜てしまう — 行っちゃった = 行く+てしまう",
-      "grammar?ら抜き言葉 — 見られる→見れる", // proposed pattern
+      "grammar〜てしまう — 行っちゃった = 行く+てしまうmark", // unplaced: a line note with its own mark
+      "grammar?ら抜き言葉 — 見られる→見れる", // proposed pattern: nothing to mark yet
       "phrase気を付ける — here: 気を付けてmark", // + its own mark button
     ]);
 
@@ -471,6 +471,76 @@ describe("playerView subtitle overlay", () => {
     video.dispatchEvent(new Event("timeupdate"));
     root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma='公園']")!.click();
     expect(pop.querySelectorAll(".gp-line-note").length).toBe(0);
+    root.remove();
+  });
+
+  it("a detected grammar unit paints its span from the pattern's state and opens a grammar layer", async () => {
+    // GRAMMAR.md — token-anchored units: the てしまっ of 食べてしまった is one
+    // unit keyed 〜てしまう, painted blue when the pattern sits in the
+    // think-you-know queue (whatever 食べる is painted), marked as its own item
+    const doc = {
+      episode_id: EP,
+      candidates: [],
+      grammar_points: { "〜てしまう": { gloss: "end up doing", level: 4 } },
+      sentences: [{
+        idx: 0, start: 0, end: 2, cls: "comprehensible",
+        tokens: [
+          { s: "食べ", l: "食べる", r: "たべ", c: true, k: true },
+          { s: "て", l: "て", r: "て", c: false, k: true },
+          { s: "しまっ", l: "しまう", r: "しまっ", c: false, k: true },
+          { s: "た", l: "た", r: "た", c: false, k: true },
+        ],
+        grammar: [{ pattern: "〜てしまう", start: 1, end: 3, status: "unknown" }],
+      }],
+    };
+    const paint = {
+      episode_id: EP, known: [], confirm: [], interest: [], grammar_confirm: ["〜てしまう"],
+      grammar_known: [], grammar_interest: [], grammar_unknown: [], at: "2026-09-08T00:00:00Z",
+    };
+    saveSettings({ serverUrl: "http://pc.ts.net:8321", token: "tok" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/transcript/"))
+          return new Response(JSON.stringify(doc), { status: 200 });
+        if (String(url).includes("/paint"))
+          return new Response(JSON.stringify(paint), { status: 200 });
+        return new Response("{}", { status: 200 });
+      }),
+    );
+    const root = playerView(EP);
+    document.body.appendChild(root);
+    await new Promise((r) => setTimeout(r, 0));
+    const video = root.querySelector("video")!;
+    video.dispatchEvent(new Event("timeupdate"));
+    await vi.waitFor(() => {
+      const spans = [...root.querySelectorAll<HTMLElement>(".subs-overlay .w[data-lemma]")];
+      expect(spans.map((w) => w.dataset.lemma)).toEqual(["食べる", "て", "しまう", "た"]);
+      // the unit's two tokens paint blue with the grammar underline; the verb doesn't
+      expect(spans[1].classList.contains("hl-know")).toBe(true);
+      expect(spans[1].classList.contains("gr")).toBe(true);
+      expect(spans[2].dataset.grammar).toBe("〜てしまう");
+      expect(spans[0].classList.contains("gr")).toBe(false);
+      expect(spans[3].classList.contains("gr")).toBe(false);
+    });
+    // tapping inside the unit: grammar layer first, then the word layer
+    root.querySelectorAll<HTMLElement>(".subs-overlay .w[data-lemma]")[2].click();
+    const pop = root.querySelector<HTMLElement>(".gloss-pop")!;
+    const layer = pop.querySelector<HTMLElement>(".gp-grammar")!;
+    expect(layer.dataset.grammar).toBe("〜てしまう");
+    expect(layer.querySelector(".gp-level")!.textContent).toBe("N4");
+    expect(layer.querySelector(".gp-gloss")!.textContent).toBe("end up doing");
+    expect(layer.querySelector(".gp-inflect")!.textContent).toBe("てしまっ ＝ 〜てしまう");
+    expect(pop.querySelector(".gp-word .gp-tag")!.textContent).toBe("word");
+    // its mark is the pattern's own — never the word's
+    layer.querySelector<HTMLButtonElement>(".gp-mark")!.click();
+    expect(getTaps(EP)["g:〜てしまう"]).toBe("k");
+    expect(getTaps(EP)["しまう"]).toBeUndefined();
+    await vi.waitFor(() => {
+      const spans = [...root.querySelectorAll<HTMLElement>(".subs-overlay .w[data-lemma]")];
+      expect(spans[1].classList.contains("tap-k")).toBe(true);
+      expect(spans[1].classList.contains("hl-know")).toBe(false); // ✓ → known → no hue
+    });
     root.remove();
   });
 

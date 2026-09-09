@@ -68,11 +68,24 @@ export interface Sentence {
   tokens: Token[];
 }
 
-/** A curated grammar-pattern usage on one sentence (GRAMMAR.md). */
+/** A grammar point on one sentence (GRAMMAR.md — token-anchored units):
+    a taxonomy pattern the server's matcher found, with the token span of
+    the attachment (てしまっ under 食べ) and the ledger's status snapshot —
+    its own item with its own mark, like a phrase. A curate-tagged pattern
+    the matcher could not place rides along without a span (a line note). */
 export interface SentenceGrammar {
   pattern: string;
+  start?: number; // token span [start, end) — absent when unplaced / old sidecars
+  end?: number;
+  status?: "unknown" | "learning" | "known"; // ledger status when pulled
   note?: string; // curate form_note (or a proposal's gloss)
   proposed?: boolean; // novel pattern awaiting taxonomy review
+}
+
+/** Gloss + JLPT tier of a taxonomy pattern (transcript `grammar_points`). */
+export interface GrammarPoint {
+  gloss: string | null;
+  level: number | null;
 }
 
 /** A multi-word expression on one sentence (GRAMMAR.md) — its own ledger
@@ -104,6 +117,9 @@ export interface TranscriptDoc {
   /** The curate pass has run: grammar/phrase notes (and curate-authored
       definitions) are included. Absent/false → sidecar refresh will retry. */
   curated?: boolean;
+  /** Gloss + level for every grammar pattern on any line (the popup's
+      grammar layer) — absent on old sidecars. */
+  grammar_points?: Record<string, GrammarPoint>;
   candidates?: string[]; // ranked high-value lemmas (absent on old sidecars)
   /** The ledger's "we think you know this" queue, narrowed to the lemmas
       that appear here (absent on old sidecars) — painted blue in the player
@@ -132,6 +148,11 @@ export interface PaintState {
   interest: string[];
   should_know?: string[]; // absent from old cached states
   grammar_confirm: string[];
+  /** The rest of the grammar axis (GRAMMAR.md — token-anchored units),
+      narrowed to this episode's patterns — absent from old cached states. */
+  grammar_known?: string[];
+  grammar_interest?: string[];
+  grammar_unknown?: string[];
   /** The phrase axis (GRAMMAR.md), narrowed to this episode's phrases:
       known / think-you-know / ★ — absent from old cached states. */
   phrase_known?: string[];
@@ -296,11 +317,12 @@ export type TapMark = "k" | "h" | "u";
     records it on the phrase item, never on the words inside it). A fourth
     element carries what the item was painted as when the mark was made
     ("" kind = word) — the ledger stores it with the claim's snapshot. */
+export type TapKind = "phrase" | "grammar" | "";
 export type TapEntry =
   | [string, TapMark]
-  | [string, TapMark, "phrase"]
-  | [string, TapMark, "phrase" | "", LookupList]
-  | [string, TapMark, "phrase" | "", LookupList | "", EncounterMode];
+  | [string, TapMark, "phrase" | "grammar"]
+  | [string, TapMark, TapKind, LookupList]
+  | [string, TapMark, TapKind, LookupList | "", EncounterMode];
 
 /** What a word was painted as when its popup opened: a list (blue
     think-you-know / ★ interest / green should-know), plain known, or nothing. */
@@ -319,8 +341,8 @@ export type EncounterMode = SubState | "listen" | "page" | "prep";
     with every batch; the server replaces the row rather than stacking. */
 export type LookupEntry =
   | [string, number, Partial<Record<LookupList, number>>]
-  | [string, number, Partial<Record<LookupList, number>>, "phrase"]
-  | [string, number, Partial<Record<LookupList, number>>, "phrase" | "",
+  | [string, number, Partial<Record<LookupList, number>>, "phrase" | "grammar"]
+  | [string, number, Partial<Record<LookupList, number>>, TapKind,
      Partial<Record<EncounterMode, number>>];
 
 export interface TapBatch {

@@ -4,7 +4,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
-import { clearTaps, cycleTap, phraseTapKey, submitTaps } from "./store";
+import { clearTaps, cycleTap, grammarTapKey, phraseTapKey, submitTaps } from "./store";
 import type { PaintState, TranscriptDoc } from "./types";
 import {
   applyKnown,
@@ -21,6 +21,9 @@ import {
   locallyInterest,
   locallyKnown,
   paintsInterest,
+  grammarAt,
+  grammarClass,
+  grammarListsFor,
   phraseClass,
   phraseListsFor,
   phraseToPaint,
@@ -181,8 +184,10 @@ describe("paint", () => {
     expect(paintsInterest(undefined, undefined, standing)).toBe(false);
   });
 
-  it("cueGrammarConfirm picks the cue's patterns that sit in the queue", () => {
-    const cue = { start: 0, end: 1, grammar: [{ pattern: "〜てしまう" }, { pattern: "〜ながら" }] };
+  it("cueGrammarConfirm picks the cue's UNPLACED patterns that sit in the queue", () => {
+    // a placed unit paints its own span; only curate-only tags need the badge
+    const cue = { start: 0, end: 1, grammar: [
+      { pattern: "〜てしまう" }, { pattern: "〜ながら" }, { pattern: "〜ておく", start: 1, end: 2 }] };
     expect(cueGrammarConfirm(cue, new Set(["〜ながら", "〜ておく"]))).toEqual(["〜ながら"]);
     expect(cueGrammarConfirm({ start: 0, end: 1 }, new Set(["〜ながら"]))).toEqual([]);
   });
@@ -249,5 +254,46 @@ describe("phrase axis", () => {
     expect(phrasesAt([p, unplaced], 7)).toEqual([]);
     expect(phrasesAt([p, unplaced], 7, true)).toEqual([unplaced]);
     expect(phrasesAt(undefined, 0, true)).toEqual([]);
+  });
+});
+
+describe("grammar axis", () => {
+  const g = { pattern: "〜てしまう", start: 1, end: 3, status: "unknown" as const };
+
+  it("a grammar mark never leaks into the word or phrase paint, and travels typed", () => {
+    cycleTap("ep1", grammarTapKey("〜てしまう")); // ✓ on the pattern
+    cycleTap("ep1", "しまう"); // ✓ on the word
+    expect(grammarListsFor(null).known).toEqual(new Set(["〜てしまう"]));
+    expect(phraseListsFor(null).known).toEqual(new Set());
+    expect(knownFor(null)).toEqual(new Set(["しまう"]));
+    expect(submitTaps("ep1").taps).toEqual(
+      expect.arrayContaining([["〜てしまう", "k", "grammar"], ["しまう", "k"]]),
+    );
+  });
+
+  it("grammarClass: local mark › live lists › sidecar snapshot › unknown", () => {
+    const lists = grammarListsFor(null);
+    expect(grammarClass(g, undefined, lists)).toBe("ph-unk");
+    expect(grammarClass({ ...g, status: "known" }, undefined, lists)).toBe("ph-known");
+    expect(grammarClass(g, "k", lists)).toBe("ph-known");
+    expect(grammarClass(g, "h", lists)).toBe("ph-int");
+    expect(grammarClass({ ...g, status: "known" }, "u", lists)).toBe("ph-unk");
+    const live = grammarListsFor(state({ grammar_known: [], grammar_confirm: ["〜てしまう"] }));
+    expect(live.live).toBe(true);
+    expect(grammarClass(g, undefined, live)).toBe("ph-know");
+    // the live state's known wins over the snapshot; a ledger ✗ subtracts
+    const known = grammarListsFor(state({ grammar_known: ["〜てしまう"], grammar_confirm: [] }));
+    expect(grammarClass(g, undefined, known)).toBe("ph-known");
+    const unk = grammarListsFor(state({ grammar_known: ["〜てしまう"], grammar_unknown: ["〜てしまう"] }));
+    expect(grammarClass({ ...g, status: "known" }, undefined, unk)).toBe("ph-unk");
+  });
+
+  it("grammarAt covers the span, never an unplaced note", () => {
+    const grammar = [g, { pattern: "〜ながら" }];
+    expect(grammarAt(grammar, 1).map((x) => x.pattern)).toEqual(["〜てしまう"]);
+    expect(grammarAt(grammar, 2).map((x) => x.pattern)).toEqual(["〜てしまう"]);
+    expect(grammarAt(grammar, 0)).toEqual([]);
+    expect(grammarAt(grammar, 3)).toEqual([]);
+    expect(grammarAt(undefined, 1)).toEqual([]);
   });
 });
