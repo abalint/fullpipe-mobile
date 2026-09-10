@@ -1,12 +1,11 @@
 // App shell: hash router + bottom nav. Tabs: queue / listen / pages /
-// progress / prep / settings; prep, player and page routes carry an episode id.
+// progress / settings; player and page routes carry an episode id.
 
 import "./style.css";
 import { queueView } from "./views/queue";
 import { passiveView } from "./views/passive";
 import { pagesView } from "./views/pages";
 import { readerView } from "./views/reader";
-import { prepView } from "./views/prep";
 import { playerView } from "./views/player";
 import { settingsView } from "./views/settings";
 import { statsView } from "./views/stats";
@@ -16,7 +15,7 @@ import { flushOutbox, installAutoFlush } from "./sync";
 import { importListenLog, recoverOpenSegment } from "./viewtime";
 import { installShareTarget } from "./share";
 import { isPageSource } from "./pages";
-import { cachedPrepIds, getCachedJobs, getSettings, hydratePrepCache } from "./store";
+import { getCachedJobs, getSettings, hydratePrepCache } from "./store";
 import { nowPlayingStrip } from "./nowplaying";
 
 const outlet = document.getElementById("outlet")!;
@@ -31,13 +30,12 @@ document.querySelector("nav")!.before(
 
 function route(): void {
   const hash = location.hash || "#/queue";
-  // #/player/<id>/<seconds> deep-links a start position (prep-doc timestamps)
+  // #/player/<id>/<seconds> deep-links a start position
   const [, view, arg, arg2] = hash.split("/").map(decodeURIComponent);
   outlet.textContent = "";
 
   let node: HTMLElement;
-  if (view === "prep" && arg) node = prepView(arg);
-  else if (view === "player" && arg)
+  if (view === "player" && arg)
     node = playerView(arg, arg2 !== undefined && arg2 !== "" ? Number(arg2) : undefined);
   else if (view === "page" && arg) node = readerView(arg);
   else if (view === "pages") node = pagesView();
@@ -47,11 +45,7 @@ function route(): void {
   else if (view === "list" && (arg === "interest" || arg === "should_know"))
     node = wordListView(arg);
   else if (view === "settings") node = settingsView();
-  else if (view === "prep") {
-    // bare prep tab → most recently cached doc, else nudge to queue
-    const ids = cachedPrepIds();
-    node = ids.length ? prepView(ids[ids.length - 1]) : queueView();
-  } else node = queueView();
+  else node = queueView();
 
   outlet.appendChild(node);
 

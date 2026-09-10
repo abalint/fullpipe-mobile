@@ -168,7 +168,7 @@ export function settingsView(): HTMLElement {
   demo.addEventListener("click", () => {
     cachePrep(demoPrep as unknown as PrepDoc);
     renderCache();
-    location.hash = `#/prep/${encodeURIComponent((demoPrep as { episode: { id: string } }).episode.id)}`;
+    location.hash = `#/player/${encodeURIComponent((demoPrep as { episode: { id: string } }).episode.id)}`;
   });
   root.appendChild(demo);
 

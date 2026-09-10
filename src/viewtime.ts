@@ -8,8 +8,11 @@
 // rewound stretch counts again (it was watched again); a seek, a pause, a
 // buffering stall count nothing. Speed is folded out (10 media-minutes at
 // 1.25× = 8 minutes of your time). `reached` vs `duration` records whether
-// the episode was finished. Segments are per sitting, split at midnight so
-// every second lands on the device-local day it was spent in.
+// the episode was finished. `played` is the list of media ranges the
+// sitting actually played — the server credits a word's exposure from the
+// ranges that cover its line, so 2 % watched is the words in that 2 %.
+// Segments are per sitting, split at midnight so every second lands on the
+// device-local day it was spent in.
 
 import { PassiveAudio } from "./audio";
 import {
@@ -98,8 +101,16 @@ export class ViewRecorder {
         secs: 0,
         reached: pos,
         duration: null,
+        played: [],
       };
     }
+    // extend the open range when this tick continues it (prev is where the
+    // last counted tick left off); a rewind or a seek — prev isn't the open
+    // range's end — opens a new range from prev
+    const ranges = (this.seg.played ??= []);
+    const open = ranges[ranges.length - 1];
+    if (open && Math.abs(open[1] - prev) < 1e-6) open[1] = pos;
+    else ranges.push([prev, pos]);
     const secs = delta / (rate > 0 ? rate : 1);
     this.seg.secs += secs;
     const state = this.opts.state?.();
@@ -134,8 +145,9 @@ export class ViewRecorder {
     if (seg && seg.secs >= 1) {
       const modes = seg.modes &&
         Object.fromEntries(Object.entries(seg.modes).map(([k, v]) => [k, round1(v as number)]));
+      const played = mergeRanges(seg.played ?? []);
       recordViewSegment({ ...seg, secs: round1(seg.secs), reached: round1(seg.reached),
-        ...(modes ? { modes } : {}) });
+        ...(modes ? { modes } : {}), ...(played.length ? { played } : {}) });
     }
   }
 
@@ -143,6 +155,21 @@ export class ViewRecorder {
   get current(): ViewSegment | null {
     return this.seg;
   }
+}
+
+/** Tidy a sitting's played ranges for the wire: rounded to 0.1 s, and a
+    range that merely continues the previous one (a pause, a stall, a
+    sub-tick hiccup — its start within a beat of the last end) folds into
+    it. Overlaps are kept apart on purpose: a rewound stretch was watched
+    twice. Exported for tests. */
+export function mergeRanges(ranges: [number, number][], joinGap = 0.5): [number, number][] {
+  const out: [number, number][] = [];
+  for (const [a, b] of ranges) {
+    const last = out[out.length - 1];
+    if (last && a >= last[1] - 1e-6 && a - last[1] <= joinGap) last[1] = Math.max(last[1], b);
+    else out.push([a, b]);
+  }
+  return out.map(([a, b]) => [round1(a), round1(b)]);
 }
 
 /** App start: a checkpointed segment still in the open slot means the

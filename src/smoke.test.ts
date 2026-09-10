@@ -1,6 +1,7 @@
-// DOM-level smoke tests for the pieces with real logic: prep rendering, tap
+// DOM-level smoke tests for the pieces with real logic: ruby markup, tap
 // cycling, and the outbox round-trip (incl. idempotent batch_id). The player
-// (SRT parsing, cue lookup, overlay taps) is covered in player.test.ts.
+// (SRT parsing, cue lookup, overlay taps, the under-video actions) is
+// covered in player.test.ts.
 // Run: npx vitest run
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +11,7 @@ import type {
   PrepDoc,
   TapBatch,
 } from "./types";
-import { renderPrep, rubyWord } from "./prep-render";
+import { rubyWord } from "./prep-render";
 import {
   actionEpisode,
   getOutbox,
@@ -51,44 +52,17 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-describe("renderPrep", () => {
-  it("renders glossary rows, sentences, and stats", () => {
-    const root = renderPrep(doc);
-    expect(root.querySelectorAll(".gloss .w[data-lemma]").length).toBe(doc.glossary.length);
-    expect(root.querySelectorAll(".sent").length).toBeGreaterThan(0);
-    expect(root.querySelector(".stats")!.textContent).toContain("%");
-  });
-
-  it("masks glosses by default", () => {
-    const root = renderPrep(doc);
-    const masked = root.querySelectorAll(".m.masked");
-    expect(masked.length).toBeGreaterThan(0);
-    masked.forEach((m) => expect(m.textContent).toBe("···"));
-  });
-
-  it("cycles taps known → high-interest → unknown → clear and persists them", () => {
-    const root = renderPrep(doc);
-    document.body.appendChild(root);
-    const w = root.querySelector<HTMLElement>(".gloss .w[data-lemma]")!;
-    const lemma = w.dataset.lemma!;
-
-    w.click();
+describe("tap cycle", () => {
+  it("cycles known → high-interest → unknown → clear and persists across reads", () => {
+    const lemma = doc.glossary[0].lemma;
+    expect(cycleTap(ep, lemma)).toBe("k");
     expect(getTaps(ep)[lemma]).toBe("k");
-    expect(w.classList.contains("tap-k")).toBe(true);
-
-    w.click();
+    expect(cycleTap(ep, lemma)).toBe("h");
     expect(getTaps(ep)[lemma]).toBe("h");
-    expect(w.classList.contains("tap-h")).toBe(true);
-
-    w.click();
+    expect(cycleTap(ep, lemma)).toBe("u");
     expect(getTaps(ep)[lemma]).toBe("u");
-    expect(w.classList.contains("tap-u")).toBe(true);
-    expect(w.classList.contains("tap-h")).toBe(false);
-
-    w.click();
+    expect(cycleTap(ep, lemma)).toBeUndefined();
     expect(getTaps(ep)[lemma]).toBeUndefined();
-    expect(w.classList.contains("tap-u")).toBe(false);
-    root.remove();
   });
 });
 
@@ -156,11 +130,8 @@ describe("outbox", () => {
   });
 
   it("freezes taps into a batch but retains the marks as a submitted baseline", () => {
-    const root = renderPrep(doc);
-    document.body.appendChild(root);
-    const w = root.querySelector<HTMLElement>(".gloss .w[data-lemma]")!;
-    const lemma = w.dataset.lemma!;
-    w.click();
+    const lemma = doc.glossary[0].lemma;
+    cycleTap(ep, lemma);
 
     const batch = submitTaps(ep);
     expect(batch.batch_id).toMatch(/^[0-9a-f]{16}$/);
@@ -171,20 +142,15 @@ describe("outbox", () => {
     // …recorded as the baseline, so there's nothing left "unsent"
     expect(getSubmitted(ep)[lemma]).toBe("k");
     expect(pendingTapCount(ep)).toBe(0);
-    root.remove();
   });
 
   it("counts a mark changed after submit as an unsent pending change", () => {
-    const root = renderPrep(doc);
-    document.body.appendChild(root);
-    const w = root.querySelector<HTMLElement>(".gloss .w[data-lemma]")!;
-    w.click(); // k
+    const lemma = doc.glossary[0].lemma;
+    cycleTap(ep, lemma); // k
     submitTaps(ep);
     expect(pendingTapCount(ep)).toBe(0);
-    w.click(); // k → h, now diverges from the submitted baseline
-    expect(w.classList.contains("tap-committed")).toBe(false);
+    cycleTap(ep, lemma); // k → h, now diverges from the submitted baseline
     expect(pendingTapCount(ep)).toBe(1);
-    root.remove();
   });
 
   it("drops a deleted episode's actions but keeps others", () => {
@@ -239,11 +205,8 @@ describe("outbox", () => {
 
   it("flushes to POST /taps and drains; keeps the batch on failure", async () => {
     saveSettings({ serverUrl: "http://pc.ts.net:8321", token: "tok" });
-    const root = renderPrep(doc);
-    document.body.appendChild(root);
-    root.querySelector<HTMLElement>(".gloss .w[data-lemma]")!.click();
+    cycleTap(ep, doc.glossary[0].lemma);
     submitTaps(ep);
-    root.remove();
 
     const posted: TapBatch[] = [];
     vi.stubGlobal(
@@ -261,11 +224,8 @@ describe("outbox", () => {
     expect(posted[0].episode_id).toBe(ep);
 
     // failure path: batch stays queued
-    const r2 = renderPrep(doc);
-    document.body.appendChild(r2);
-    r2.querySelector<HTMLElement>(".gloss .w[data-lemma]")!.click();
+    cycleTap(ep, doc.glossary[0].lemma);
     submitTaps(ep);
-    r2.remove();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })));
     const bad = await flushOutbox();
     expect(bad.sent).toBe(0);

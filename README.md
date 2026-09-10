@@ -1,11 +1,11 @@
 # fullPipe mobile — Android client
 
-The phone side of `fullPipe/MOBILE.md`: queue screen · prep-doc viewer with
-know/don't-know taps · tap outbox with idempotent sync · in-app learning
-player (tokenized tap-able subs, replay-line, speed) · 1–5★ rating +
-taste-tag picker · Android share-sheet enqueue target. Capacitor (web UI wrapped
-native); the prep viewer is a TS port of `fullPipe/render/template.html`, so
-the in-app doc looks and behaves like the static one.
+The phone side of `fullPipe/MOBILE.md`: queue screen · in-app learning
+player (tokenized tap-able subs, replay-line, speed) with the episode's
+close-out under the video (synopsis · rating · delete / passive / mint cards)
+· tap outbox with idempotent sync · 1–5★ rating + taste-tag picker · Android
+share-sheet enqueue target. Capacitor (web UI wrapped native). The prep page
+was removed 2026-09-10 — the player is the only per-episode screen.
 
 Talks to the fullPipe sync server (`fullPipe/server/`) over Tailscale. Point Settings → Server URL at the PC's MagicDNS name
 (`http://<pc>.<tailnet>.ts.net:<port>`). Cleartext HTTP is only permitted for
@@ -16,7 +16,7 @@ so use the hostname, not a raw `100.x` IP.
 
 ```
 src/
-├── main.ts            app shell: hash router + bottom nav (Queue / Listen / Progress / Prep / Settings)
+├── main.ts            app shell: hash router + bottom nav (Queue / Listen / Pages / Progress / Settings)
 ├── api.ts             client for the MOBILE.md server API
 ├── store.ts           settings · per-episode taps · outbox · prep-doc + stats cache (localStorage)
 ├── sync.ts            opportunistic outbox flush (start / online / visible)
@@ -24,10 +24,10 @@ src/
 ├── listfilter.ts      sort + status/genre/on-phone filters shared by the Queue and Listen tabs
 ├── nowplaying.ts      now-playing strip above the nav → back to the episode the audio service is playing
 ├── paint.ts           live highlight state (GET /paint) overlaid on cached sidecars
-├── prep-render.ts     prep-doc renderer (port of render/template.html)
+├── prep-render.ts     token / ruby markup shared by the player overlay, popup and reader
 ├── share.ts           JS side of the share-sheet target
-├── views/             queue · prep · player · stats · settings
-├── demo-prep.json     fixture (from render/demo-prep.html) — Settings → "Load demo prep doc"
+├── views/             queue · player · passive · pages · reader · stats · confirm · settings
+├── demo-prep.json     fixture (from render/demo-prep.html) — Settings → "Load demo prep doc" (opens in the player)
 └── smoke.test.ts      DOM smoke tests (vitest + happy-dom)
 ```
 
@@ -78,9 +78,9 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   a change starts a ~1.2 s debounce, then the episode's whole mark set is
   frozen into one batch (an unsent batch for the same episode is replaced in
   place — the server dedupes per word, so re-sending is free) and the outbox
-  flushes. There is no submit button; the prep bar / reader toolbar only
-  narrate the state (syncing… / queued / synced ✔). A close-out (Mark watched,
-  finished) sends any still-debouncing marks first.
+  flushes. There is no submit button; the reader toolbar only narrates the
+  state (syncing… / queued / synced ✔). A close-out (mint cards, passive,
+  finished reading) sends any still-debouncing marks first.
 - **Sort + filter** (Queue and Listen tabs, `listfilter.ts`): the sort select
   (newest / oldest / easiest / hardest / longest / shortest / top rated /
   title) plus a filter row — status (to watch · in progress = started and left partway · watched · preparing),
@@ -165,17 +165,29 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   Jobs stranded mid-flight by a server restart are reclaimed automatically
   server-side (`jobqueue.reap_stale`) — a stranded card-push resurfaces as the
   existing retry-cards path.
-- **Rating + tags:** stars on watched/staged queue rows and the post-watch prep
-  bar. Once a star is set, the six taste tags appear (grouped liked/didn't, all
+- **Rating + tags:** stars on watched/staged queue rows and under the video in
+  the player. Once a star is set, the six taste tags appear (grouped liked/didn't, all
   shown regardless of the star); taps are debounced and append a review via
   `POST /rating {rating, tags}` — re-rating never overwrites, the server's
   on-read verdict takes the latest. Current rating + tags come back on `GET /jobs`.
 - **Player** (`#/player/<id>[/<sec>]`): plays the downloaded file
   (Capacitor local server → seek works) — download first from the queue row.
+  **Under the video** (the prep page's replacement, 2026-09-10): the curated
+  synopsis (ruby-annotated), the rating block, and three buttons — **🗑 delete**
+  (the queue's swipe-delete, same confirm; series rows stay phone-local),
+  **🎧 passive** (`POST /watched {cards:false}` if the row isn't closed out
+  yet, then `POST /jobs/{id}/passive`), **🃏 mint cards** (`POST /watched
+  {cards:true}` — the Anki push runs server-side in the background; the
+  queue row narrates it). All three queue in the outbox when offline. There
+  is **no mark-watched**: every sitting the player records carries the
+  media ranges it actually played (`viewtime.ts` → `ViewSegment.played`),
+  and the server credits each word's exposure from the ranges that cover
+  its lines — 2 % watched is the words in that 2 %. The queue row's
+  `watched` state is a finished marker that flips at 80 % of play time.
   Subtitles are an overlay built from the tokenized transcript
   (`GET /transcript`, cached at download as `videos/<ep>.transcript.json`) —
-  every content word is a tap target feeding the *same* per-episode tap store
-  as the prep doc, so watch-time marks sync live like prep-doc marks; plain-SRT
+  every content word is a tap target feeding the per-episode tap store, so
+  watch-time marks sync live; plain-SRT
   fallback when no transcript exists. Cues linger until the next line (capped
   +2.5 s) so ASR sentence-end timing doesn't cut subs off early; classic
   white-on-black-outline styling. Prep-doc keywords (curated gloss rows +
@@ -207,8 +219,7 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   edge, clear of hardsubs) — global viewing prefs like the cc mode.
   Controls: replay-current-line, prev/next
   line, speed cycle, furigana toggle, fullscreen (+landscape lock), resume
-  position (cleared at watched), wake lock while playing. Prep-doc sentence
-  timestamps deep-link into the player at that moment. WorkManager
+  position (cleared near the end), wake lock while playing. WorkManager
   background pulls (the MOBILE.md decoupled-pull flow) are not built yet.
 - First run with no server configured lands on Settings.
 

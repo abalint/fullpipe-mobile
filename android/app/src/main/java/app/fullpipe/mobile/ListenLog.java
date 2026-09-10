@@ -21,7 +21,9 @@ import java.util.UUID;
  * is usually dead while listening happens. One segment per track sitting:
  * wall-clock milliseconds the player was actually playing (pauses count
  * nothing), the furthest position reached, the track length, and the
- * device-local day. Segments close on track change / stop / service death
+ * device-local day, plus `played` — the media ranges that actually ran
+ * (contiguous playback extends the open range; a seek opens a new one), which
+ * is what credits word exposures server-side. Segments close on track change / stop / service death
  * and are split at midnight; the open one is checkpointed every few seconds
  * so a process kill loses almost nothing. Closed segments queue in prefs
  * until JS drains them ({@link #snapshot}) and acks ({@link #ack}) — the
@@ -46,6 +48,11 @@ class ListenLog {
     private JSONObject open;
     private double openMs;
     private long lastCheckpointAt;
+    /** Media position (s) at the last tick — where the open range ends. */
+    private double lastPosSec = -1;
+    /** A jump between ticks beyond what the wall-clock could have played
+        (with headroom for speed up to 2× and a late handler) is a seek. */
+    private static final double SEEK_SLACK_SECS = 1.5;
 
     ListenLog(Context ctx) {
         prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -91,11 +98,13 @@ class ListenLog {
             open.put("secs", 0);
             open.put("reached", Math.max(0, positionMs) / 1000.0);
             open.put("duration", durationMs > 0 ? durationMs / 1000.0 : JSONObject.NULL);
+            open.put("played", new JSONArray());
         } catch (JSONException e) {
             open = null;
             return;
         }
         openMs = 0;
+        lastPosSec = Math.max(0, positionMs) / 1000.0;
         lastCheckpointAt = SystemClock.elapsedRealtime();
     }
 
@@ -118,6 +127,26 @@ class ListenLog {
             double pos = Math.max(0, positionMs) / 1000.0;
             if (pos > open.optDouble("reached", 0)) open.put("reached", pos);
             if (durationMs > 0) open.put("duration", durationMs / 1000.0);
+            // the played ranges: this tick continues the open range when the
+            // position moved forward by no more than the wall-clock allows
+            // (2× speed + slack); anything else is a seek/rewind → new range
+            JSONArray played = open.optJSONArray("played");
+            if (played == null) {
+                played = new JSONArray();
+                open.put("played", played);
+            }
+            double advanced = pos - lastPosSec;
+            double maxAdvance = wallDeltaMs / 1000.0 * 2.0 + SEEK_SLACK_SECS;
+            if (lastPosSec >= 0 && advanced > 0 && advanced <= maxAdvance) {
+                JSONArray last = played.length() > 0 ? played.getJSONArray(played.length() - 1) : null;
+                if (last != null && Math.abs(last.getDouble(1) - lastPosSec) < 0.05) {
+                    last.put(1, Math.round(pos * 10.0) / 10.0);
+                } else {
+                    played.put(new JSONArray().put(Math.round(lastPosSec * 10.0) / 10.0)
+                                              .put(Math.round(pos * 10.0) / 10.0));
+                }
+            }
+            lastPosSec = pos;
         } catch (JSONException ignored) {
         }
         long now = SystemClock.elapsedRealtime();

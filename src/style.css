@@ -595,12 +595,20 @@ button.pv.on { border-color: var(--accent); color: var(--accent); }
 
 .player-view:fullscreen { background: #000; padding: 12px;
                           justify-content: center; }
-.player-view:fullscreen h1, .player-view:fullscreen .btnrow { display: none; }
+.player-view:fullscreen h1, .player-view:fullscreen .player-under { display: none; }
 .player-view:fullscreen .player-stage { border-radius: 0; min-height: 0; }
 .player-view:fullscreen video { max-height: calc(100vh - 90px); }
 .player-view:fullscreen .player-controls button,
 .player-view:fullscreen .clock { background: transparent; color: #ddd;
                                  border-color: #444; }
+
+/* under the video: synopsis · rating · delete / passive / mint cards —
+   the episode's whole close-out lives here (no prep page since 2026-09-10) */
+.player-under { display: flex; flex-direction: column; gap: 10px;
+                padding-top: 4px; border-top: 1px solid var(--border); }
+.player-under .synopsis { line-height: 1.6; }
+.player-under .synopsis[hidden] { display: none; }
+.player-under .bar-row { margin-top: 2px; }
 
 /* --- Pages tab / 5ch thread reader ------------------------------------- */
 .reader-toolbar { position: sticky; top: 0; z-index: 5; display: flex;

@@ -25,11 +25,16 @@
 // furigana, fullscreen), resume position, wake lock while playing. The 🎧
 // toggle hands the current position off to the native passive-audio service
 // so the episode keeps playing with the screen off, and back again.
+// Under the video (2026-09-10 — the prep page is gone, this is the episode's
+// only screen): the curated synopsis, the rating, and the close-out actions —
+// delete · passive · mint cards. There is no "mark watched": the server flips
+// an episode watched from the sittings this player records (viewtime.ts),
+// once play time passes its activation fraction.
 
 import { Capacitor } from "@capacitor/core";
 import type { PluginListenerHandle } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { PassiveAudio } from "../audio";
 import { createGlossPopup } from "../gloss-popup";
 import type { KeywordInfo } from "../gloss-popup";
@@ -53,10 +58,21 @@ import {
   NO_PHRASES,
 } from "../paint";
 import type { GrammarLists, ListSnapshot, PaintLists, PhraseLists } from "../paint";
-import { tokenSpan } from "../prep-render";
+import { segsNode, tokenSpan } from "../prep-render";
 import { epLabel, nextEpisode } from "../series";
-import { autoplayNext, cachePrep, getCachedJobs, getCachedPrep, getTaps, grammarTapKey, phraseTapKey } from "../store";
-import { onTapSync, scheduleTapSync } from "../livesync";
+import {
+  autoplayNext,
+  cachePrep,
+  getCachedJobs,
+  getCachedPrep,
+  getTaps,
+  grammarTapKey,
+  phraseTapKey,
+  queuePassive,
+  queueWatched,
+} from "../store";
+import { onTapSync, scheduleTapSync, syncTapsNow } from "../livesync";
+import { ratingBlock, removeJob } from "./queue";
 import { ViewRecorder } from "../viewtime";
 import {
   clearPosition,
@@ -69,8 +85,10 @@ import {
   savePosition,
 } from "../video";
 import type {
+  FollowState,
   GrammarPoint,
   Definitions,
+  Job,
   PaintState,
   PrepDoc,
   SentenceGrammar,
@@ -554,16 +572,34 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     if (!highValue.size && doc) highValue = new Set(doc.glossary.map((g) => g.lemma));
   };
 
-  // keyword glosses/notes from the prep doc (cache-first; fetch is best-effort
-  // — without it keywords just aren't special)
-  let keywords = keywordIndex(getCachedPrep(episodeId));
-  if (!keywords.size) {
+  // the curated synopsis (あらすじ) — the one piece of the old prep page
+  // that survives, under the video
+  const synopsis = el("div", "synopsis");
+  synopsis.hidden = true;
+  const showSynopsis = (doc: PrepDoc | null) => {
+    const cur = doc?.curate;
+    if (!cur?.synopsis) return;
+    synopsis.textContent = "";
+    if (cur.synopsis_segs?.length) synopsis.appendChild(segsNode(cur.synopsis_segs));
+    else synopsis.textContent = cur.synopsis;
+    synopsis.hidden = false;
+  };
+
+  // keyword glosses/notes + synopsis from the prep doc (cache-first; the
+  // fetch is best-effort — without it keywords just aren't special and the
+  // synopsis stays blank). A doc cached before curation lacks both, so it
+  // is refetched.
+  const cachedDoc = getCachedPrep(episodeId);
+  let keywords = keywordIndex(cachedDoc);
+  showSynopsis(cachedDoc);
+  if (!keywords.size || !cachedDoc?.curate) {
     void api
       .getPrep(episodeId)
       .then((doc) => {
         cachePrep(doc);
         keywords = keywordIndex(doc);
         fallbackHighValue(doc);
+        showSynopsis(doc);
         repaintCue();
       })
       .catch(() => {});
@@ -670,13 +706,127 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
 
   controls.append(seekRow, btnRow, panel);
 
-  // --- footer ------------------------------------------------------------
-  const footer = el("div", "btnrow");
-  const prepLink = el("a", "btn small", "open prep doc") as HTMLAnchorElement;
-  prepLink.href = `#/prep/${encodeURIComponent(episodeId)}`;
-  footer.appendChild(prepLink);
+  // --- under the video: synopsis · rating · delete / passive / mint cards --
+  const under = el("div", "player-under");
+  const barStatus = el("div", "muted bar-status");
 
-  root.append(stage, controls, status, footer);
+  // the queue row: state (has the close-out run?), rating prefill, and the
+  // Job the delete needs — the cached snapshot first (works offline), then
+  // the live row
+  let job: Job | undefined = getCachedJobs()?.jobs.find((j) => j.episode_id === episodeId);
+
+  // Rating + tags (SURVEY.md) — ratable any time, not only after the credits.
+  // Engaging it guards the server prefill from clobbering a rating in
+  // progress.
+  let engaged = false;
+  const stars = el("div", "player-rating");
+  const mountRating = (
+    rating: number | null,
+    tags: string[],
+    axes: Record<string, number> = {},
+    follow: FollowState | null = null,
+  ) => {
+    stars.textContent = "";
+    stars.appendChild(
+      ratingBlock(
+        episodeId,
+        rating,
+        tags,
+        () => (engaged = true),
+        () => (barStatus.textContent = "rating queued — will sync when reachable"),
+        axes,
+        follow,
+      ),
+    );
+  };
+  mountRating(job?.rating ?? null, job?.tags ?? [], job?.axes ?? {}, job?.follow ?? null);
+  void api
+    .getJob(episodeId)
+    .then((j) => {
+      job = j;
+      if (!engaged) mountRating(j.rating ?? null, j.tags ?? [], j.axes ?? {}, j.follow ?? null);
+    })
+    .catch(() => {});
+
+  const actions = el("div", "bar-row");
+  const deleteBtn = el("button", "", "🗑 delete") as HTMLButtonElement;
+  deleteBtn.title = "Delete this episode (video, prep, server artifacts)";
+  const passiveBtn = el("button", "", "🎧 passive") as HTMLButtonElement;
+  passiveBtn.title = "Done watching — keep it on the Listen tab for passive audio";
+  const mintBtn = el("button", "", "🃏 mint cards") as HTMLButtonElement;
+  mintBtn.title = "Push this episode's selected cards to Anki";
+  actions.append(deleteBtn, passiveBtn, mintBtn);
+  under.append(synopsis, stars, actions, barStatus);
+
+  // Delete = the queue row's swipe-delete, with the same confirm and the same
+  // cost (removeJob: server purge for a standalone episode, phone-local for a
+  // series episode). The file may be open in <video> — pause first; the
+  // route-away cleanup detaches it.
+  deleteBtn.addEventListener("click", () => {
+    const j = job;
+    if (!j) {
+      barStatus.textContent = "⚠ queue row not loaded — delete from the queue screen";
+      return;
+    }
+    if (!audioMode) video.pause();
+    void removeJob(j, () => (location.hash = "#/queue"));
+  });
+
+  // Passive = done watching, shelve onto the Listen tab. The server only
+  // shelves a watched row, so an episode whose close-out hasn't run yet is
+  // marked watched first (no cards — minting is its own button). Offline:
+  // both land in the outbox in that order (FIFO).
+  const closedOut = () => job?.state === "watched" || job?.state === "pushing";
+  passiveBtn.addEventListener("click", async () => {
+    passiveBtn.disabled = true;
+    try {
+      await syncTapsNow(episodeId); // a mark still debouncing goes first
+      if (!closedOut()) await api.markWatched(episodeId, false);
+      job = await api.setPassive(episodeId, true);
+      barStatus.textContent = "🎧 on the Listen tab";
+    } catch (e) {
+      if (e instanceof ApiError && e.status === undefined) {
+        if (!closedOut()) queueWatched(episodeId, false);
+        queuePassive(episodeId, true);
+        barStatus.textContent = "🎧 on the Listen tab · queued offline — syncs when reachable";
+        return;
+      }
+      barStatus.textContent = `⚠ ${(e as Error).message}`;
+      passiveBtn.disabled = false;
+    }
+  });
+
+  // Mint cards = the deck push (tools/deck.py): the server activates the
+  // episode's exposures if play time hasn't already, then pushes the
+  // feedback-selected cards to Anki in the background — the queue row
+  // narrates it (`pushing` → `watched`) and carries any failure + retry.
+  mintBtn.addEventListener("click", async () => {
+    mintBtn.disabled = true;
+    try {
+      await syncTapsNow(episodeId);
+      const res = await api.markWatched(episodeId, true);
+      const c = res.cards;
+      if (c?.error) {
+        barStatus.textContent = `⚠ cards failed: ${c.error} — tap again to retry`;
+        mintBtn.disabled = false;
+        return;
+      }
+      barStatus.textContent = c?.queued
+        ? `minting ${c.queued} card${c.queued > 1 ? "s" : ""} in the background (see queue)`
+        : `no cards minted — ${c?.note ?? "nothing selected"}`;
+      if (job) job = { ...job, state: "pushing" };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === undefined) {
+        queueWatched(episodeId, true);
+        barStatus.textContent = "mint queued offline — syncs when reachable";
+        return;
+      }
+      barStatus.textContent = `⚠ ${(e as Error).message}`;
+      mintBtn.disabled = false;
+    }
+  });
+
+  root.append(stage, controls, status, under);
 
   // --- subtitles ---------------------------------------------------------
   let cues: Cue[] = [];
@@ -939,8 +1089,8 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   // --- series: up next --------------------------------------------------------
   // When a box-set episode ends, offer the next one (series.ts order) with a
   // countdown when it's already on the phone — back-to-back watching without
-  // a trip through the queue. Marking watched stays a deliberate act (prep
-  // screen / queue row), so the card only navigates.
+  // a trip through the queue. Watched follows from play time server-side,
+  // so the card only navigates.
   const upnext = el("div", "upnext");
   upnext.hidden = true;
   stage.appendChild(upnext);

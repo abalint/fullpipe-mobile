@@ -405,6 +405,11 @@ export interface ViewSegment {
   /** Seconds per subtitle state within the sitting (player sittings; the
       🎧 handoff's service segments are stamped `audio` on import). */
   modes?: Partial<Record<SubState, number>>;
+  /** The media ranges actually played, in media seconds: contiguous
+      playback extends the open range, a seek/rewind opens a new one (so a
+      rewatched stretch appears twice). This is what credits word
+      exposures on the server — a word was seen when its line played. */
+  played?: [number, number][];
 }
 
 /** One queued offline action. The outbox is FIFO (an episode's taps flush

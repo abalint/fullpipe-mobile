@@ -1,13 +1,12 @@
 // Queue screen: enqueue box, live job list from the server, and — when the
 // server is unreachable — the same list rebuilt from the last cached snapshot,
-// with the offline-capable actions (play the downloaded video, open the cached
-// prep, rate, mark watched) still live and server-only ones hidden. Pending
-// outbox actions overlay the rows so a queued mark-watched reads as watched.
+// with the offline-capable actions (play the downloaded video, rate) still
+// live and server-only ones hidden. Pending outbox actions overlay the rows so
+// a queued close-out reads as watched.
 
 import { api, ApiError } from "../api";
 import { cancelTapSync } from "../livesync";
 import {
-  cachedPrepIds,
   cacheJobs,
   cachePrep,
   clearSubmitted,
@@ -504,14 +503,6 @@ export function jobRow(
     });
     actions.appendChild(b);
   }
-  if (
-    ["staged", "reconciled", "pushing", "watched"].includes(job.state) &&
-    (!offline || getCachedPrep(job.episode_id))
-  ) {
-    const open = el("a", "small btn", "prep") as HTMLAnchorElement;
-    open.href = `#/prep/${encodeURIComponent(job.episode_id)}`;
-    actions.appendChild(open);
-  }
   // video: download once Stage 1 has it, then play in-app
   if (canDownload(job)) {
     const ep = job.episode_id;
@@ -584,8 +575,8 @@ function deleteMessage(job: Job): string {
     );
   if (job.state === "staged" || job.state === "reconciled")
     return (
-      `Delete "${name}"?\n\nNOT watched yet — no cards were pushed, and its ledger traces ` +
-      `(submitted feedback included) will be unwound.` +
+      `Delete "${name}"?\n\nNot finished — no cards were pushed. The words in the parts you ` +
+      `played (and your marks) stay in the ledger; the rest of its traces are unwound.` +
       (job.rating != null ? "\nThe star rating is kept." : "")
     );
   return `Delete "${name}"?\nRemoves the download and all server artifacts. Nothing has been mined from it.`;
@@ -791,22 +782,6 @@ export function queueView(): HTMLElement {
           void removeJob(j, rerender, offline),
         ),
       );
-    // cached prep docs with no queue row (snapshot predates them / demo doc)
-    // stay reachable offline
-    if (offline) {
-      const known = new Set(jobs.map((j) => j.episode_id));
-      const orphans = cachedPrepIds().filter((id) => !known.has(id));
-      if (orphans.length) {
-        list.appendChild(el("h2", "", "Cached prep docs"));
-        for (const id of orphans) {
-          const row = el("div", "job");
-          const a = el("a", "job-title", getCachedPrep(id)?.episode.title || id) as HTMLAnchorElement;
-          a.href = `#/prep/${encodeURIComponent(id)}`;
-          row.appendChild(a);
-          list.appendChild(row);
-        }
-      }
-    }
   }
 
   /** Pull prep docs for every curated episode in the background so "staged

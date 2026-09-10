@@ -30,6 +30,7 @@ import {
   fmtDur,
   groupWeeks,
   manualSegment,
+  mergeRanges,
   recoverOpenSegment,
   weekStart,
 } from "./viewtime";
@@ -94,6 +95,8 @@ describe("ViewRecorder", () => {
     const log = getViewLog();
     expect(log.length).toBe(1);
     expect(log[0]).toMatchObject({ episode_id: "ep1", kind: "watch", secs: 10, reached: 10 });
+    // the range that played — what credits the words in it server-side
+    expect(log[0].played).toEqual([[0, 10]]);
     expect(log[0].day).toBe(dayKey());
     // and it's queued for the server
     expect(getOutbox().map((a) => a.kind)).toEqual(["viewtime"]);
@@ -127,6 +130,31 @@ describe("ViewRecorder", () => {
     // even without reanchor(), a big jump between ticks is ignored
     r.tick(1700);
     expect(r.current!.secs).toBeCloseTo(18, 5);
+    // the played ranges say exactly which stretches ran: 0→10, the rewound
+    // 4→10 again (kept apart — it was watched twice), then 900→902
+    r.close();
+    expect(getViewLog()[0].played).toEqual([[0, 10], [4, 10], [900, 902]]);
+  });
+
+  it("a pause or a stall does not split the played range; a seek does", () => {
+    const r = new ViewRecorder(opts);
+    play(r, 0, 5);
+    r.tick(5); // paused: same position ticks are not playback
+    r.tick(5);
+    play(r, 5.25, 8);
+    expect(r.current!.played).toEqual([[0, 8]]);
+    r.reanchor();
+    r.tick(300);
+    play(r, 300.25, 301);
+    r.close();
+    expect(getViewLog()[0].played).toEqual([[0, 8], [300, 301]]);
+  });
+
+  it("mergeRanges folds continuations and rounds, but keeps a rewind apart", () => {
+    expect(mergeRanges([[0, 4.04], [4.3, 9.96]])).toEqual([[0, 10]]);
+    expect(mergeRanges([[0, 10], [4, 10]])).toEqual([[0, 10], [4, 10]]);
+    expect(mergeRanges([[0, 10], [11, 12]])).toEqual([[0, 10], [11, 12]]);
+    expect(mergeRanges([])).toEqual([]);
   });
 
   it("folds playback speed out — 10 media-seconds at 2× is 5 s of your time", () => {

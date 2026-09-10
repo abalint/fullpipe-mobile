@@ -31,7 +31,17 @@ import {
 } from "./views/player";
 import type { Cue, SubTier } from "./views/player";
 import type { PaintLists } from "./paint";
-import { cachePrep, cycleTap, getTaps, saveSettings, phraseTapKey } from "./store";
+import {
+  cacheJobs,
+  cachePrep,
+  cycleTap,
+  getTaps,
+  pendingPassive,
+  pendingWatched,
+  saveSettings,
+  phraseTapKey,
+} from "./store";
+import type { Job } from "./types";
 import { clearPosition, getPosition, savePosition } from "./video";
 import type { PrepDoc } from "./types";
 
@@ -820,6 +830,149 @@ describe("playerView subtitle overlay", () => {
     expect(getTaps(EP)["公園"]).toBe("k");
     mark.click();
     expect(getTaps(EP)["公園"]).toBe("h");
+    root.remove();
+  });
+});
+
+// --- under the video: synopsis · rating · delete / passive / mint cards ------
+// The prep page is gone (2026-09-10); the player carries the episode's
+// close-out. No "mark watched" — the server flips watched from play time.
+describe("player under-video actions", () => {
+  const EP = "yt_undertest";
+  const DOC = {
+    episode: { id: EP, title: "テスト" },
+    stats: { token_comprehensibility: 0.9, total_sentences: 1, i_plus_1: 0, reinforcement: 0 },
+    curate: { synopsis: "犬が公園へ行く話。", synopsis_segs: [["犬", "いぬ"], ["が公園へ行く話。", null]] },
+    glossary: [{ lemma: "公園", gloss: "park" }],
+    iplus1: [],
+    reinforcement: [],
+    sentences_by_idx: {},
+  } as unknown as PrepDoc;
+  const JOB = (state: Job["state"]): Job => ({
+    episode_id: EP, source: "https://youtu.be/undertest", title: "テスト", state,
+    rating: 4, tags: ["fascinating"],
+  });
+
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  /** Mount with a recording fetch: `calls` collects method + path + body. */
+  function mount(state: Job["state"], opts: { offline?: boolean } = {}) {
+    saveSettings({ serverUrl: "http://pc.ts.net:8321", token: "tok" });
+    cachePrep(DOC);
+    cacheJobs([JOB(state)]);
+    const calls: { method: string; path: string; body?: Record<string, unknown> }[] = [];
+    let job = JOB(state);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit = {}) => {
+        if (opts.offline) throw new TypeError("Failed to fetch");
+        const path = new URL(String(url)).pathname;
+        const method = init.method ?? "GET";
+        calls.push({ method, path, body: init.body ? JSON.parse(init.body as string) : undefined });
+        if (method === "GET" && path === `/jobs/${EP}`)
+          return new Response(JSON.stringify(job), { status: 200 });
+        if (path === `/watched/${EP}`) {
+          job = { ...job, state: "pushing" };
+          const cards = (init.body && JSON.parse(init.body as string).cards) !== false
+            ? { queued: 3 } : { queued: 0, note: "declined — cards skipped" };
+          return new Response(JSON.stringify({ watched: true, cards }), { status: 200 });
+        }
+        if (path === `/jobs/${EP}/passive`) {
+          job = { ...job, passive: true };
+          return new Response(JSON.stringify(job), { status: 200 });
+        }
+        if (method === "DELETE" && path === `/jobs/${EP}`)
+          return new Response(JSON.stringify({ deleted: EP, files_removed: 2 }), { status: 200 });
+        return new Response("nope", { status: 404 });
+      }),
+    );
+    const root = playerView(EP);
+    document.body.appendChild(root);
+    const btn = (label: string) =>
+      [...root.querySelectorAll<HTMLButtonElement>(".player-under button")]
+        .find((b) => b.textContent === label)!;
+    return { root, calls, btn, status: () => root.querySelector(".player-under .bar-status")!.textContent };
+  }
+
+  it("shows the curated synopsis (ruby-annotated) under the video, then rating and the three actions", async () => {
+    const { root } = mount("staged");
+    await tick();
+    const under = root.querySelector<HTMLElement>(".player-under")!;
+    const syn = under.querySelector<HTMLElement>(".synopsis")!;
+    expect(syn.hidden).toBe(false);
+    expect(syn.textContent).toContain("公園へ行く話");
+    expect(syn.querySelector("ruby rt")!.textContent).toBe("いぬ"); // synopsis_segs → furigana
+    // order: synopsis · rating · actions
+    const kids = [...under.children].map((c) => c.className.split(" ")[0]);
+    expect(kids.slice(0, 3)).toEqual(["synopsis", "player-rating", "bar-row"]);
+    expect(under.querySelectorAll(".rating .star.on").length).toBe(4); // prefilled from the row
+    expect([...under.querySelectorAll(".bar-row button")].map((b) => b.textContent)).toEqual([
+      "🗑 delete", "🎧 passive", "🃏 mint cards",
+    ]);
+    // nothing left of the prep page
+    expect(root.querySelector("a[href^='#/prep']")).toBeNull();
+    expect(root.textContent).not.toContain("Mark watched");
+    root.remove();
+  });
+
+  it("mint cards posts the close-out with cards:true and reports the queued push", async () => {
+    const { root, calls, btn, status } = mount("staged");
+    await tick();
+    btn("🃏 mint cards").click();
+    await tick();
+    const post = calls.find((c) => c.path === `/watched/${EP}`)!;
+    expect(post.method).toBe("POST");
+    expect(post.body).toEqual({ cards: true });
+    expect(status()).toContain("minting 3 cards");
+    expect(btn("🃏 mint cards").disabled).toBe(true);
+    root.remove();
+  });
+
+  it("passive on an unwatched row marks watched without cards, then shelves it", async () => {
+    const { root, calls, btn, status } = mount("staged");
+    await tick();
+    btn("🎧 passive").click();
+    await tick();
+    const writes = calls.filter((c) => c.method === "POST").map((c) => [c.path, c.body]);
+    expect(writes).toEqual([
+      [`/watched/${EP}`, { cards: false }],
+      [`/jobs/${EP}/passive`, { passive: true }],
+    ]);
+    expect(status()).toContain("Listen tab");
+    root.remove();
+  });
+
+  it("passive on an already-watched row only shelves — the close-out is not re-run", async () => {
+    const { root, calls, btn } = mount("watched");
+    await tick();
+    btn("🎧 passive").click();
+    await tick();
+    const writes = calls.filter((c) => c.method === "POST").map((c) => c.path);
+    expect(writes).toEqual([`/jobs/${EP}/passive`]);
+    root.remove();
+  });
+
+  it("delete runs the queue's delete (confirm → DELETE /jobs) and returns to the queue", async () => {
+    const { root, calls, btn } = mount("staged");
+    await tick();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    btn("🗑 delete").click();
+    await tick();
+    await tick();
+    expect(calls.some((c) => c.method === "DELETE" && c.path === `/jobs/${EP}`)).toBe(true);
+    expect(location.hash).toBe("#/queue");
+    root.remove();
+  });
+
+  it("offline: mint and passive land in the outbox in FIFO order", async () => {
+    const { root, btn } = mount("staged", { offline: true });
+    await tick();
+    btn("🃏 mint cards").click();
+    await tick();
+    expect(pendingWatched(EP)).toEqual({ cards: true });
+    btn("🎧 passive").click();
+    await tick();
+    expect(pendingPassive(EP)).toBe(true);
     root.remove();
   });
 });
