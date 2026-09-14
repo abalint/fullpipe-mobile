@@ -5,7 +5,9 @@
 // overlay tracks the art. The reading behaviours come from the comicReader
 // app (Kotlin): fit-to-screen pages, spreads fit to width, pinch 1–5×,
 // double-tap 1↔2× about the tap point, zoom kept across page turns, and a
-// pull past the edge of a zoomed page turning it.
+// pull past the edge of a zoomed page turning it — plus its reading modes:
+// page order left-to-right / right-to-left or a vertical scroll, each
+// either paged or as one continuous strip of pages (stripLayout).
 
 import type { MangaBlock, Token, TranscriptSentence } from "./types";
 
@@ -17,6 +19,8 @@ export const DOUBLE_TAP_SCALE = 2;
 export const SPREAD_RATIO = 1.2;
 
 export type Direction = "rtl" | "ltr";
+/** comicReader's ReadingMode: page order, or pages read top-to-bottom. */
+export type Mode = Direction | "vertical";
 
 export interface Fit {
   w: number; // rendered page size at scale 1
@@ -77,12 +81,40 @@ export function tapZone(x: number, sw: number, dir: Direction): Zone {
   return "center";
 }
 
+/** The zone for a reading mode: thirds across the stage for the page-order
+    modes, thirds down it for vertical (the bottom third turns forward). */
+export function tapZoneFor(x: number, y: number, sw: number, sh: number, mode: Mode): Zone {
+  if (mode !== "vertical") return tapZone(x, sw, mode);
+  const third = y / sh;
+  if (third < 1 / 3) return "prev";
+  if (third > 2 / 3) return "next";
+  return "center";
+}
+
 /** A horizontal drag/swipe of dx px (finger movement): which way it turns.
     Dragging the content leftwards (dx < 0) reveals what lies to the right —
     the previous page in RTL, the next in LTR. */
 export function swipeTurn(dx: number, dir: Direction): 1 | -1 {
   const towardRight = dx < 0;
   return (dir === "rtl" ? !towardRight : towardRight) ? 1 : -1;
+}
+
+/** A drag of `d` px along the mode's axis (finger movement — or how far a
+    zoomed page was pulled past its bound): which way it turns. Vertical:
+    content dragged upwards (d < 0) reveals the page below. */
+export function dragTurn(d: number, mode: Mode): 1 | -1 {
+  if (mode === "vertical") return d < 0 ? 1 : -1;
+  return swipeTurn(d, mode);
+}
+
+/** A finished drag of (dx, dy): the turn it asks for, or null when it was
+    too short or ran mostly across the mode's axis. */
+export function swipeTurnFor(dx: number, dy: number, mode: Mode, min: number): 1 | -1 | null {
+  const vertical = mode === "vertical";
+  const along = vertical ? dy : dx;
+  const across = vertical ? dx : dy;
+  if (Math.abs(along) < min || Math.abs(along) < Math.abs(across)) return null;
+  return dragTurn(along, mode);
 }
 
 /** Fragment of a token that lands on one printed line (a token can wrap). */
@@ -157,6 +189,114 @@ export function blockStyle(block: MangaBlock, f: number): BlockStyle {
   const fontSize = Math.max(6, Math.min(est, (along / longest) * 1.05, lineSize * 1.15));
   return { left: x1 * f, top: y1 * f, width, height, fontSize, lineSize,
            vertical: block.vertical };
+}
+
+// --- continuous scrolling -----------------------------------------------------------
+// comicReader's "Scroll" checkbox: every page in one strip — fit to the
+// stage width and stacked for vertical, fit to the stage height and laid
+// side by side for the page-order modes (page 0 at the right end for RTL).
+// The strip is one big "page" for the zoom/pan maths above: stripFit gives
+// its Fit, clampView / zoomAbout work unchanged, and the reader mounts only
+// the slots near the viewport.
+
+export interface Slot {
+  i: number; // page index
+  x: number; // within the strip at scale 1
+  y: number;
+  w: number;
+  h: number;
+  f: number; // page px → css px for this page's bubbles
+}
+
+export interface Strip {
+  slots: Slot[]; // in page order (positions run backwards for RTL)
+  w: number; // total extent at scale 1
+  h: number;
+  vertical: boolean;
+}
+
+/** Lay every page into the strip. A page whose size the OCR didn't record
+    takes the median aspect of the ones that did (2:3 when none did) until
+    its scan loads. */
+export function stripLayout(sizes: { w: number; h: number }[], sw: number, sh: number, mode: Mode): Strip {
+  const ratios = sizes.filter((s) => s.w > 0 && s.h > 0).map((s) => s.w / s.h).sort((a, b) => a - b);
+  const fallback = ratios.length ? ratios[ratios.length >> 1] : 2 / 3;
+  const vertical = mode === "vertical";
+  const slots: Slot[] = [];
+  let along = 0;
+  sizes.forEach((s, i) => {
+    const known = s.w > 0 && s.h > 0;
+    const r = known ? s.w / s.h : fallback;
+    if (vertical) {
+      const h = sw / r;
+      slots.push({ i, x: 0, y: along, w: sw, h, f: known ? sw / s.w : 1 });
+      along += h;
+    } else {
+      const w = sh * r;
+      slots.push({ i, x: along, y: 0, w, h: sh, f: known ? sh / s.h : 1 });
+      along += w;
+    }
+  });
+  if (mode === "rtl") for (const s of slots) s.x = along - s.x - s.w;
+  return { slots, w: vertical ? sw : along, h: vertical ? along : sh, vertical };
+}
+
+/** The strip as one page for the view maths: centred across the axis when
+    narrower than the stage, starting at the stage's origin otherwise. */
+export function stripFit(strip: Strip, sw: number, sh: number): Fit {
+  return { w: strip.w, h: strip.h, x: Math.max(0, (sw - strip.w) / 2), y: Math.max(0, (sh - strip.h) / 2), f: 1 };
+}
+
+/** The stage's window onto the strip along its axis, in strip px at scale 1. */
+export function viewRange(v: View, fit: Fit, sw: number, sh: number, vertical: boolean): [number, number] {
+  const from = vertical ? (-fit.y - v.ty) / v.s : (-fit.x - v.tx) / v.s;
+  return [from, from + (vertical ? sh : sw) / v.s];
+}
+
+/** Slots overlapping [from, to] along the strip's axis. */
+export function slotsIn(strip: Strip, from: number, to: number): Slot[] {
+  return strip.slots.filter((s) => {
+    const a = strip.vertical ? s.y : s.x;
+    const len = strip.vertical ? s.h : s.w;
+    return a < to && a + len > from;
+  });
+}
+
+/** The page under strip offset `c` along the axis; past either end, the
+    page at that end. */
+export function slotAt(strip: Strip, c: number): number {
+  if (!strip.slots.length) return 0;
+  let first = strip.slots[0];
+  let last = first;
+  for (const s of strip.slots) {
+    const a = strip.vertical ? s.y : s.x;
+    const len = strip.vertical ? s.h : s.w;
+    if (c >= a && c < a + len) return s.i;
+    if (a < (strip.vertical ? first.y : first.x)) first = s;
+    if (a > (strip.vertical ? last.y : last.x)) last = s;
+  }
+  return c < 0 ? first.i : last.i;
+}
+
+/** How far into page i the stage's reading-start edge sits, as a fraction
+    of the page's extent along the axis (0 = at its start edge; negative /
+    over 1 when the page is off screen). Survives a relayout: see viewToSlot. */
+export function slotAnchor(strip: Strip, i: number, v: View, fit: Fit, sw: number, sh: number, mode: Mode): number {
+  const slot = strip.slots[i] ?? strip.slots[0];
+  const [from, to] = viewRange(v, fit, sw, sh, strip.vertical);
+  if (mode === "vertical") return (from - slot.y) / slot.h;
+  if (mode === "rtl") return (slot.x + slot.w - to) / slot.w;
+  return (from - slot.x) / slot.w;
+}
+
+/** The view that brings page i's reading-start edge (top / left / right for
+    RTL) — or the point `frac` of the way into it — to the stage's edge at
+    scale s, keeping the cross-axis position. Clamp it before use. */
+export function viewToSlot(strip: Strip, i: number, fit: Fit, cur: View, s: number, sw: number, mode: Mode, frac = 0): View {
+  const slot = strip.slots[i] ?? strip.slots[0];
+  if (mode === "vertical") return { s, tx: cur.tx, ty: -fit.y - (slot.y + frac * slot.h) * s };
+  if (mode === "rtl") return { s, tx: sw - fit.x - (slot.x + slot.w - frac * slot.w) * s, ty: cur.ty };
+  return { s, tx: -fit.x - (slot.x + frac * slot.w) * s, ty: cur.ty };
 }
 
 /** Page index after a turn of `delta`, clamped; null when already at the end. */

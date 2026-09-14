@@ -25,7 +25,7 @@ src/
 ├── nowplaying.ts      now-playing strip above the nav → back to the episode the audio service is playing
 ├── paint.ts           live highlight state (GET /paint) overlaid on cached sidecars
 ├── manga.ts           manga bundles (structure + tokens + dictionary + page scans) · reading-time recorder
-├── manga-layout.ts    reader geometry: fit / zoom bounds / tap zones · bubble tokens → printed lines
+├── manga-layout.ts    reader geometry: fit / zoom bounds / tap zones / continuous strip · bubble tokens → printed lines
 ├── prep-render.ts     token / ruby markup shared by the player overlay, popup and reader
 ├── share.ts           JS side of the share-sheet target
 ├── views/             queue · player · passive · pages (the Read tab: manga + 5ch) · reader (5ch) · manga-reader · stats · confirm · settings
@@ -239,12 +239,21 @@ worker OCRs them on the desktop GPU) above the 5ch threads. ⬇ pulls a
 volume's bundle — `manga/<id>/{manga.json, transcript.json, definitions.json,
 pages/*.jpg}`, resumable — and 📖 opens `views/manga-reader.ts`:
 
-- full-screen page scans, right-to-left by default (`⇄` flips it per series);
-  tap the far side to turn forward, the near side to go back, the centre to
-  toggle the chrome; swipe to turn; pinch 1–5×, double-tap 1↔2× about the
-  finger; zoom persists across page turns and a pull past the edge of a
-  zoomed page turns it; spreads fit to width; the slider scrubs; the last
-  page is remembered — the behaviours of the comicReader app, in the webview;
+- full-screen page scans in comicReader's reading modes: `⇄` cycles the
+  mode — right-to-left (default), left-to-right, or vertical (`縦`: pages
+  read top to bottom) — and `∞` toggles continuous scrolling, every page in
+  one strip (fit to the width when vertical, to the height otherwise) that
+  scrolls and flings with the finger, versus one page at a time; both are
+  remembered per series and become the default for the next series
+  (`manga.ts readingMode / continuousScroll`). Paged: tap the far side in
+  the reading direction to turn forward, the near side to go back (top /
+  bottom thirds when vertical), the centre to toggle the chrome; swipe to
+  turn (the page rides with the finger and springs back if the swipe
+  doesn't commit); a zoomed page only pans, never turns; spreads fit to
+  width. Always: pinch 1–5×, double-tap 1↔2× about the finger, pans keep
+  their momentum, zoom kept across page turns, the slider scrubs, the last page is remembered (in
+  continuous mode the page under the viewport's centre is the current one:
+  counter, resume and reading time follow it);
 - the text under the overlay is the PC's AI read (fullPipe/MANGA.md: Opus
   agents transcribe the pages mokuro boxed and gloss every bubble); a
   volume downloaded before that read lands re-pulls its structure and

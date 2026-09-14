@@ -36,7 +36,6 @@ export interface MangaRecord {
 
 const key = (ep: string) => `fp.manga.${ep}`;
 const pageKey = (ep: string) => `fp.mpage.${ep}`;
-const dirKey = (slug: string) => `fp.manga.dir.${slug}`;
 
 export function getMangaRecord(ep: string): MangaRecord | null {
   try {
@@ -52,7 +51,7 @@ export function mangaRecords(): { ep: string; rec: MangaRecord }[] {
   const out: { ep: string; rec: MangaRecord }[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (!k?.startsWith("fp.manga.") || k.startsWith("fp.manga.dir.")) continue;
+    if (!k?.startsWith("fp.manga.")) continue;
     const ep = k.slice("fp.manga.".length);
     const rec = getMangaRecord(ep);
     if (rec) out.push({ ep, rec });
@@ -64,7 +63,7 @@ export function isComplete(rec: MangaRecord | null): boolean {
   return !!rec && rec.pagesDownloaded >= rec.pageCount;
 }
 
-// --- reading position / direction -------------------------------------------------
+// --- reading position / mode -------------------------------------------------
 
 /** Last page index open in the reader (resume), or null. */
 export function getMangaPage(ep: string): number | null {
@@ -81,17 +80,45 @@ export function clearMangaPage(ep: string): void {
   localStorage.removeItem(pageKey(ep));
 }
 
-export type ReadingDirection = "rtl" | "ltr";
+export type ReadingMode = "rtl" | "ltr" | "vertical";
 
-/** Per-series page direction — manga is right-to-left unless the reader
-    flips it (a left-to-right edition, a webtoon export). */
-export function readingDirection(slug: string, fallback: ReadingDirection = "rtl"): ReadingDirection {
-  const v = localStorage.getItem(dirKey(slug));
-  return v === "ltr" || v === "rtl" ? v : fallback;
+// comicReader's reader settings: a global default and a per-series
+// override, both written by a change made in the reader (the app does the
+// same — the series remembers, the next new series starts from the default).
+const MODE_KEY = "fp.mreader.mode";
+const SCROLL_KEY = "fp.mreader.scroll";
+const modeKey = (slug: string) => `fp.mreader.mode.${slug}`;
+const scrollKey = (slug: string) => `fp.mreader.scroll.${slug}`;
+
+const isMode = (v: string | null): v is ReadingMode => v === "ltr" || v === "rtl" || v === "vertical";
+
+/** Reading mode for a series: page order right-to-left (manga) or
+    left-to-right, or a vertical scroll (webtoons) — the series' own choice,
+    else the last mode chosen anywhere, else `fallback` (the volume's
+    declared order). */
+export function readingMode(slug: string, fallback: ReadingMode = "rtl"): ReadingMode {
+  const own = localStorage.getItem(modeKey(slug));
+  if (isMode(own)) return own;
+  const global = localStorage.getItem(MODE_KEY);
+  return isMode(global) ? global : fallback;
 }
 
-export function setReadingDirection(slug: string, dir: ReadingDirection): void {
-  localStorage.setItem(dirKey(slug), dir);
+export function setReadingMode(slug: string, mode: ReadingMode): void {
+  localStorage.setItem(modeKey(slug), mode);
+  localStorage.setItem(MODE_KEY, mode);
+}
+
+/** Continuous scrolling (pages as one strip) vs one page at a time. Off
+    until chosen. */
+export function continuousScroll(slug: string): boolean {
+  const own = localStorage.getItem(scrollKey(slug));
+  if (own === "on" || own === "off") return own === "on";
+  return localStorage.getItem(SCROLL_KEY) === "on";
+}
+
+export function setContinuousScroll(slug: string, on: boolean): void {
+  localStorage.setItem(scrollKey(slug), on ? "on" : "off");
+  localStorage.setItem(SCROLL_KEY, on ? "on" : "off");
 }
 
 // --- download / delete ------------------------------------------------------------------

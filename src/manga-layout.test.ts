@@ -3,10 +3,20 @@ import {
   blockLines,
   blockStyle,
   clampView,
+  dragTurn,
   fitPage,
+  slotAnchor,
+  slotAt,
+  slotsIn,
+  stripFit,
+  stripLayout,
   swipeTurn,
+  swipeTurnFor,
   tapZone,
+  tapZoneFor,
   turnPage,
+  viewRange,
+  viewToSlot,
   zoomAbout,
 } from "./manga-layout";
 import type { MangaBlock, TranscriptSentence } from "./types";
@@ -68,10 +78,90 @@ describe("tap zones / swipes / turns", () => {
     expect(swipeTurn(80, "rtl")).toBe(1);
     expect(swipeTurn(-80, "ltr")).toBe(1);
   });
+  it("vertical mode: zones run top to bottom, swipes up turn forward", () => {
+    expect(tapZoneFor(150, 10, 300, 600, "vertical")).toBe("prev");
+    expect(tapZoneFor(150, 590, 300, 600, "vertical")).toBe("next");
+    expect(tapZoneFor(150, 300, 300, 600, "vertical")).toBe("center");
+    expect(tapZoneFor(10, 300, 300, 600, "rtl")).toBe("next"); // page-order modes unchanged
+    expect(dragTurn(-50, "vertical")).toBe(1);
+    expect(dragTurn(50, "vertical")).toBe(-1);
+    expect(swipeTurnFor(5, -80, "vertical", 60)).toBe(1);
+    expect(swipeTurnFor(-80, 5, "vertical", 60)).toBeNull(); // across the axis
+    expect(swipeTurnFor(0, -30, "vertical", 60)).toBeNull(); // too short
+    expect(swipeTurnFor(80, 10, "rtl", 60)).toBe(1);
+    expect(swipeTurnFor(80, 90, "rtl", 60)).toBeNull();
+  });
   it("turnPage clamps", () => {
     expect(turnPage(0, 3, -1)).toBeNull();
     expect(turnPage(2, 3, 1)).toBeNull();
     expect(turnPage(1, 3, 1)).toBe(2);
+  });
+});
+
+describe("continuous strip", () => {
+  // a portrait page, a spread, a portrait page, and one the OCR never sized
+  const sizes = [{ w: 800, h: 1200 }, { w: 1600, h: 1200 }, { w: 800, h: 1200 }, { w: 0, h: 0 }];
+  it("vertical: pages fit the width and stack; unknown sizes take the median aspect", () => {
+    const strip = stripLayout(sizes, 400, 800, "vertical");
+    expect(strip.vertical).toBe(true);
+    expect(strip.slots.map((s) => [s.y, s.h])).toEqual([[0, 600], [600, 300], [900, 600], [1500, 600]]);
+    expect(strip.slots[0].f).toBe(0.5);
+    expect(strip.w).toBe(400);
+    expect(strip.h).toBe(2100);
+    const fit = stripFit(strip, 400, 800);
+    expect([fit.x, fit.y, fit.w, fit.h]).toEqual([0, 0, 400, 2100]);
+  });
+  it("horizontal: pages fit the height side by side, page 0 at the right end for RTL", () => {
+    const ltr = stripLayout(sizes, 400, 800, "ltr");
+    const xs = ltr.slots.map((s) => s.x);
+    expect(xs[0]).toBe(0);
+    expect(xs[1]).toBeCloseTo(533.33);
+    expect(xs[2]).toBeCloseTo(1600);
+    expect(ltr.slots[1].w).toBeCloseTo(1066.67);
+    expect(ltr.w).toBeCloseTo(2666.67);
+    const rtl = stripLayout(sizes, 400, 800, "rtl");
+    expect(rtl.w).toBeCloseTo(2666.67);
+    expect(rtl.slots[0].x).toBeCloseTo(2133.33); // page 0 at the right end
+    expect(rtl.slots[3].x).toBeCloseTo(0);
+  });
+  it("finds the pages in view and the page under the centre", () => {
+    const strip = stripLayout(sizes, 400, 800, "vertical");
+    expect(slotsIn(strip, 500, 700).map((s) => s.i)).toEqual([0, 1]);
+    expect(slotAt(strip, 650)).toBe(1);
+    expect(slotAt(strip, -5)).toBe(0);
+    expect(slotAt(strip, 99999)).toBe(3);
+    const rtl = stripLayout(sizes, 400, 800, "rtl");
+    expect(slotAt(rtl, -5)).toBe(3); // the left end is the last page
+    expect(slotAt(rtl, 99999)).toBe(0);
+  });
+  it("scrolls to a page's reading-start edge and reads the window back", () => {
+    const strip = stripLayout(sizes, 400, 800, "vertical");
+    const fit = stripFit(strip, 400, 800);
+    const v = clampView(viewToSlot(strip, 1, fit, { s: 1, tx: 0, ty: 0 }, 1, 400, "vertical"), fit, 400, 800);
+    expect(v.ty).toBe(-600);
+    expect(viewRange(v, fit, 400, 800, true)).toEqual([600, 1400]);
+    // zoomed 2×: the window halves in strip px
+    const z = clampView(viewToSlot(strip, 1, fit, { s: 2, tx: 0, ty: 0 }, 2, 400, "vertical"), fit, 400, 800);
+    expect(viewRange(z, fit, 400, 800, true)).toEqual([600, 1000]);
+    const rtl = stripLayout(sizes, 400, 800, "rtl");
+    const rfit = stripFit(rtl, 400, 800);
+    const r0 = clampView(viewToSlot(rtl, 0, rfit, { s: 1, tx: 0, ty: 0 }, 1, 400, "rtl"), rfit, 400, 800);
+    expect(r0.tx + rtl.w).toBeCloseTo(400); // page 0's right edge on the stage's right edge
+    expect(slotAt(rtl, viewRange(r0, rfit, 400, 800, false)[0] + 200)).toBe(0);
+  });
+  it("an anchor into a page survives a relayout at another size", () => {
+    for (const mode of ["vertical", "ltr", "rtl"] as const) {
+      const a = stripLayout(sizes, 400, 800, mode);
+      const af = stripFit(a, 400, 800);
+      const v = clampView(viewToSlot(a, 1, af, { s: 1, tx: 0, ty: 0 }, 1, 400, mode, 0.25), af, 400, 800);
+      const frac = slotAnchor(a, 1, v, af, 400, 800, mode);
+      expect(frac).toBeCloseTo(0.25);
+      // rotate the phone: same fraction of the same page under the edge
+      const b = stripLayout(sizes, 800, 400, mode);
+      const bf = stripFit(b, 800, 400);
+      const w = clampView(viewToSlot(b, 1, bf, v, 1, 800, mode, frac), bf, 800, 400);
+      expect(slotAnchor(b, 1, w, bf, 800, 400, mode)).toBeCloseTo(0.25);
+    }
   });
 });
 

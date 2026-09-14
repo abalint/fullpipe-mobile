@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { MAX_PAGE_SECS, ReadRecorder, readingDirection, setReadingDirection } from "./manga";
+import { continuousScroll, MAX_PAGE_SECS, ReadRecorder, readingMode, setContinuousScroll, setReadingMode } from "./manga";
 import { getOpenViewSegment, getOutbox, getViewLog } from "./store";
 
 beforeEach(() => localStorage.clear());
@@ -76,11 +76,26 @@ describe("ReadRecorder", () => {
   });
 });
 
-describe("reading direction", () => {
-  it("defaults to rtl per series and remembers a flip", () => {
-    expect(readingDirection("dandadan")).toBe("rtl");
-    setReadingDirection("dandadan", "ltr");
-    expect(readingDirection("dandadan")).toBe("ltr");
-    expect(readingDirection("other", "ltr")).toBe("ltr");
+describe("reading mode / continuous scroll", () => {
+  it("falls back to the volume's order, then remembers per series and as the default", () => {
+    expect(readingMode("dandadan")).toBe("rtl");
+    expect(readingMode("webtoon", "ltr")).toBe("ltr");
+    setReadingMode("dandadan", "vertical");
+    expect(readingMode("dandadan")).toBe("vertical");
+    // comicReader: a change in the reader is also the new default for other series…
+    expect(readingMode("other", "ltr")).toBe("vertical");
+    // …but a series' own choice wins
+    setReadingMode("other", "ltr");
+    expect(readingMode("other")).toBe("ltr");
+    expect(readingMode("dandadan")).toBe("vertical");
+  });
+  it("continuous scrolling is off until chosen, then remembered the same way", () => {
+    expect(continuousScroll("dandadan")).toBe(false);
+    setContinuousScroll("dandadan", true);
+    expect(continuousScroll("dandadan")).toBe(true);
+    expect(continuousScroll("other")).toBe(true);
+    setContinuousScroll("other", false);
+    expect(continuousScroll("other")).toBe(false);
+    expect(continuousScroll("dandadan")).toBe(true);
   });
 });

@@ -686,7 +686,8 @@ button.more { display: block; margin: 12px auto 24px; }
               display: flex; flex-direction: column; overflow: hidden;
               -webkit-user-select: none; user-select: none; }
 .mg-stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; }
-.mg-page { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.mg-column { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.mg-page { position: absolute; background: #141414; } /* the slot shows dark until the scan lands */
 .mg-img { display: block; width: 100%; height: 100%; -webkit-user-drag: none; }
 .mg-overlay { position: absolute; inset: 0; }
 .mg-status { position: absolute; left: 50%; bottom: 72px; transform: translateX(-50%);
