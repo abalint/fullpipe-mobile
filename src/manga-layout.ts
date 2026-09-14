@@ -178,7 +178,7 @@ export interface BlockStyle {
     lines sharing the box across its writing axis, the glyph size from the
     OCR estimate capped so the longest line fits its box. */
 export function blockStyle(block: MangaBlock, f: number): BlockStyle {
-  const [x1, y1, x2, y2] = block.box;
+  const [x1, y1, x2, y2] = blockBox(block);
   const width = Math.max(1, (x2 - x1) * f);
   const height = Math.max(1, (y2 - y1) * f);
   const n = Math.max(1, block.lines.length);
@@ -189,6 +189,62 @@ export function blockStyle(block: MangaBlock, f: number): BlockStyle {
   const fontSize = Math.max(6, Math.min(est, (along / longest) * 1.05, lineSize * 1.15));
   return { left: x1 * f, top: y1 * f, width, height, fontSize, lineSize,
            vertical: block.vertical };
+}
+
+export interface LineStyle {
+  left: number; // css px within the block at scale 1
+  top: number;
+  width: number;
+  height: number;
+  fontSize: number; // px
+  letterSpacing: number; // px added after each glyph so n glyphs span the line
+}
+
+/** Where one printed line sits within its block at fit scale f, from the
+    OCR's own box for that line: the glyphs are laid at the line's pitch
+    (its length over its character count), sized to that pitch but no
+    wider than the line (the OCR box is the glyph size across), and the
+    slack between glyph and pitch becomes letter-spacing — so each glyph
+    lands on the printed one, not just the line as a whole. */
+export function lineStyle(
+  box: [number, number, number, number],
+  chars: number,
+  vertical: boolean,
+  f: number,
+  origin: [number, number],
+): LineStyle {
+  const [x1, y1, x2, y2] = box;
+  const width = Math.max(1, (x2 - x1) * f);
+  const height = Math.max(1, (y2 - y1) * f);
+  const along = vertical ? height : width;
+  const cross = vertical ? width : height;
+  const n = Math.max(1, chars);
+  const pitch = along / n;
+  const fontSize = Math.max(4, Math.min(cross, pitch));
+  return {
+    left: (x1 - origin[0]) * f,
+    top: (y1 - origin[1]) * f,
+    width,
+    height,
+    fontSize,
+    letterSpacing: Math.max(0, pitch - fontSize),
+  };
+}
+
+/** The block's box for the overlay: the union of its line boxes when it
+    has them (mokuro's block box can sit inside or beside its lines), else
+    the block box itself. */
+export function blockBox(block: MangaBlock): [number, number, number, number] {
+  const boxes = block.line_boxes;
+  if (!boxes?.length) return block.box;
+  let [x1, y1, x2, y2] = boxes[0];
+  for (const [a, b, c, d] of boxes) {
+    x1 = Math.min(x1, a);
+    y1 = Math.min(y1, b);
+    x2 = Math.max(x2, c);
+    y2 = Math.max(y2, d);
+  }
+  return [x1, y1, x2, y2];
 }
 
 // --- continuous scrolling -----------------------------------------------------------

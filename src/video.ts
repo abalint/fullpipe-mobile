@@ -31,8 +31,10 @@ import type { Definitions, TranscriptDoc } from "./types";
        as 市内) are gone; a cached sidecar would keep showing them.
     9: manga volumes are rebuilt by the AI read (tools.manga read-apply):
        new sentence track, new bubble line counts, bubble glosses — a
-       cached volume must re-pull manga.json + transcript. */
-export const SIDECAR_FORMAT = 9;
+       cached volume must re-pull manga.json + transcript.
+   10: manga bubbles carry a box per printed line (`line_boxes`) so the
+       overlay sits on the glyphs — a cached volume must re-pull manga.json. */
+export const SIDECAR_FORMAT = 10;
 
 export interface VideoRecord {
   path: string;

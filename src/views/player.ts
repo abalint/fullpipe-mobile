@@ -40,21 +40,25 @@ import { createGlossPopup } from "../gloss-popup";
 import type { KeywordInfo } from "../gloss-popup";
 import { NO_CONFIRM } from "../lists";
 import {
+  getSubTier,
+  isIplus1,
+  paintWordSpans,
+  setSubTier,
+  soleUnknown,
+  SUB_TIERS,
+  tokenHighlight,
+} from "../highlight";
+import {
   applyPaintKnown,
   fetchPaint,
   getCachedPaint,
-  grammarAt,
-  grammarClass,
   grammarListsFor,
-  listClass,
   listsFor,
   lookupListOf,
   NO_GRAMMAR,
   NO_LISTS,
   paintsInterest,
-  phraseClass,
   phraseListsFor,
-  phraseToPaint,
   NO_PHRASES,
 } from "../paint";
 import type { GrammarLists, ListSnapshot, PaintLists, PhraseLists } from "../paint";
@@ -66,8 +70,6 @@ import {
   getCachedJobs,
   getCachedPrep,
   getTaps,
-  grammarTapKey,
-  phraseTapKey,
   queuePassive,
   queueWatched,
 } from "../store";
@@ -97,9 +99,11 @@ import type {
   Token,
 } from "../types";
 
-// the popup card is shared with the page reader now — re-exported so existing
-// imports (tests, tokenHighlight callers) keep working
+// the popup card and the highlight pass are shared with the readers now —
+// re-exported so existing imports (tests, tokenHighlight callers) keep working
 export type { KeywordInfo } from "../gloss-popup";
+export type { SubTier } from "../highlight";
+export { getSubTier, isIplus1, setSubTier, soleUnknown, SUB_TIERS, tokenHighlight } from "../highlight";
 
 /** One subtitle cue: tokenized (tappable) or plain text (SRT fallback). */
 export interface Cue {
@@ -324,68 +328,6 @@ export function stepSubRise(dir: 1 | -1): number {
   const n = Math.max(0, Math.min(SUB_RISE_MAX, getSubRise() + dir));
   localStorage.setItem(SUB_RISE_KEY, String(n));
   return n;
-}
-
-/** Highlight intensity: nothing · the global lists + high-value + the i+1
-    target · + every unknown word. Word-level text color only — no
-    backgrounds over video (see style.css .subs-overlay rules). */
-export type SubTier = "off" | "focus" | "learn";
-export const SUB_TIERS: SubTier[] = ["off", "focus", "learn"];
-const SUB_TIER_KEY = "fp.sub.tier";
-
-export function getSubTier(): SubTier {
-  const raw = localStorage.getItem(SUB_TIER_KEY);
-  // "all" (the retired corpus-audit tier) reads as learn
-  return (SUB_TIERS as string[]).includes(raw ?? "") ? (raw as SubTier) : "learn";
-}
-
-export function setSubTier(tier: SubTier): void {
-  localStorage.setItem(SUB_TIER_KEY, tier);
-}
-
-/** The cue's single unknown content lemma, or null (0 or ≥2 unknowns).
-    With the coverage `cls` this is the i+1/reinforcement target; without it
-    (old sidecars) it doubles as the i+1 detector. */
-export function soleUnknown(c: Cue): string | null {
-  const unk = new Set(
-    (c.tokens ?? []).filter((t) => t.c && !t.k && t.l).map((t) => t.l as string),
-  );
-  return unk.size === 1 ? unk.values().next().value! : null;
-}
-
-/** Is this cue an i+1 moment? Trust the coverage classification when the cue
-    carries one; otherwise fall back to "exactly one unknown content word"
-    (which then also counts reinforcement lines — acceptable for old sidecars). */
-export function isIplus1(c: Cue): boolean {
-  if (c.cls) return c.cls === "i_plus_1";
-  return soleUnknown(c) != null;
-}
-
-/** Word-level highlight class for a token at a tier, or null.
-    Priority: the global lists first — think-you-know (blue) > high interest
-    (purple) > should-know (green) — they are facts about the user, not this
-    episode, and paint at every tier but off. Then the episode's own:
-    curated keyword (pink, dotted) > i+1 target (orange underline — targets
-    are usually candidates too, and the i+1 emphasis must win) > high-value
-    candidate (pink) > unknown (orange, learn tier only). A reinforcement
-    target (still on a young card) is just an unknown here. */
-export function tokenHighlight(
-  t: Token,
-  tier: SubTier,
-  keywords: Map<string, KeywordInfo>,
-  highValue: Set<string>,
-  target: string | null,
-  cls?: string,
-  lists?: PaintLists,
-): string | null {
-  if (tier === "off" || !t.c || !t.l) return null;
-  const global = lists ? listClass(t.l, lists) : null;
-  if (global) return global;
-  if (keywords.has(t.l)) return "kw";
-  if (t.l === target && cls !== "reinforcement") return "hl-target";
-  if (highValue.has(t.l)) return "hl-hv";
-  if (tier === "learn" && !t.k) return "hl-unk";
-  return null;
 }
 
 /** lemma → gloss/notes for the prep doc's *noted* words: glossary rows the
@@ -839,69 +781,16 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
 
   /** In-place repaint of the spans on screen after a mark moves: the global
       lists are recomputed (a ★ takes a word from green to purple, a ✓ ends
-      both), each word's highlight is re-derived, and the tap classes layered
-      on top. Keeps the span elements, so an open popup stays anchored. */
-  const HL_CLASSES = ["hl-know", "hl-int", "hl-sk", "kw", "hl-hv", "hl-target", "hl-unk", "gr"];
-  // a phrase span paints like ONE word in the phrase's state (user rule,
-  // 2026-09-05: no separate underline) — its tokens take the word hues
-  const PHRASE_HL: Record<string, string | null> = {
-    "ph-known": null, "ph-know": "hl-know", "ph-int": "hl-int", "ph-unk": "hl-unk",
-  };
+      both), each word's highlight is re-derived (highlight.ts — the same
+      pass the manga reader runs), and the tap classes layered on top.
+      Keeps the span elements, so an open popup stays anchored. */
   const paintTaps = () => {
-    const taps = getTaps(episodeId);
     lists = listsFor(paint, snapshot);
     phraseLists = phraseListsFor(paint);
     grammarLists = grammarListsFor(paint);
     const c = current >= 0 ? cues[current] : undefined;
-    const tier = getSubTier();
-    const target = c ? soleUnknown(c) : null;
-    overlay.querySelectorAll<HTMLElement>(".w[data-lemma]").forEach((w) => {
-      const lemma = w.dataset.lemma!;
-      const mark = taps[lemma];
-      const ti = w.dataset.ti != null ? Number(w.dataset.ti) : undefined;
-      const t = ti != null ? c?.tokens?.[ti] : undefined;
-      // the phrase span this token sits in (GRAMMAR.md) is one unit: every
-      // token of it paints as if it were that one word, in the PHRASE's
-      // state — so an unknown expression made of known words still shows
-      const p = ti != null && tier !== "off"
-        ? phraseToPaint(c?.phrases, c?.tokens, ti, episodeId, phraseLists)
-        : undefined;
-      w.classList.remove(...HL_CLASSES);
-      if (p) {
-        const pmark = taps[phraseTapKey(p.canonical)];
-        const hl = PHRASE_HL[phraseClass(p, pmark, phraseLists)];
-        if (hl && (hl !== "hl-unk" || tier === "learn")) w.classList.add(hl);
-        w.classList.toggle("tap-k", pmark === "k");
-        w.classList.toggle("tap-h", pmark === "h");
-        w.classList.toggle("tap-u", pmark === "u");
-        w.dataset.phrase = p.canonical;
-        return;
-      }
-      delete w.dataset.phrase;
-      // the grammar unit this token sits in (GRAMMAR.md — token-anchored
-      // units) paints from the PATTERN's state, in the word hues plus a
-      // dotted underline that says "attachment, not a word": the てしまっ
-      // of 食べてしまった goes blue when 〜てしまう is in the think-you-know
-      // queue, whatever 食べる is painted
-      const g = ti != null && tier !== "off" ? grammarAt(c?.grammar, ti)[0] : undefined;
-      if (g) {
-        const gmark = taps[grammarTapKey(g.pattern)];
-        const hl = PHRASE_HL[grammarClass(g, gmark, grammarLists)];
-        if (hl && (hl !== "hl-unk" || tier === "learn")) w.classList.add(hl, "gr");
-        w.classList.toggle("tap-k", gmark === "k");
-        w.classList.toggle("tap-h", gmark === "h");
-        w.classList.toggle("tap-u", gmark === "u");
-        w.dataset.grammar = g.pattern;
-        return;
-      }
-      delete w.dataset.grammar;
-      if (t) {
-        const hl = tokenHighlight(t, tier, keywords, highValue, target, c!.cls, lists);
-        if (hl) w.classList.add(hl);
-      }
-      w.classList.toggle("tap-k", mark === "k");
-      w.classList.toggle("tap-h", paintsInterest(mark, lemma, lists.interest));
-      w.classList.toggle("tap-u", mark === "u");
+    paintWordSpans(overlay, () => c, {
+      episodeId, tier: getSubTier(), lists, phraseLists, grammarLists, keywords, highValue,
     });
   };
 

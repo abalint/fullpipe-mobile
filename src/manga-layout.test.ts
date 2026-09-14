@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   blockLines,
+  blockBox,
   blockStyle,
   clampView,
+  lineStyle,
   dragTurn,
   fitPage,
   slotAnchor,
@@ -203,5 +205,28 @@ describe("blockStyle", () => {
     // 40 * 0.5 = 20px would overflow: 10 chars must fit 150px → ~15.75
     expect(st.fontSize).toBeCloseTo(15.75);
     expect(st.vertical).toBe(true);
+  });
+});
+
+describe("lineStyle / blockBox", () => {
+  it("lays a line on its own OCR box: glyphs at the printed pitch", () => {
+    // a vertical column 30 wide × 200 tall holding 5 glyphs at fit 0.5
+    const st = lineStyle([100, 50, 130, 250], 5, true, 0.5, [90, 40]);
+    expect([st.left, st.top, st.width, st.height]).toEqual([5, 5, 15, 100]);
+    // pitch 20px, glyph capped at the column's 15px, the rest is spacing
+    expect(st.fontSize).toBe(15);
+    expect(st.letterSpacing).toBe(5);
+    // a horizontal line 200 wide × 30 tall, 10 glyphs: pitch 10 < 15 → 10, no spacing
+    const h = lineStyle([0, 0, 400, 60], 10, false, 0.5, [0, 0]);
+    expect(h.fontSize).toBe(20);
+    expect(h.letterSpacing).toBe(0);
+  });
+
+  it("the block box is the union of its line boxes when it has them", () => {
+    const block: MangaBlock = { box: [100, 50, 160, 350], vertical: true, font_size: 40,
+      lines: [10, 5], sents: [], line_boxes: [[130, 40, 165, 360], [95, 50, 125, 200]] };
+    expect(blockBox(block)).toEqual([95, 40, 165, 360]);
+    expect(blockStyle(block, 1).left).toBe(95);
+    expect(blockBox({ ...block, line_boxes: undefined })).toEqual([100, 50, 160, 350]);
   });
 });

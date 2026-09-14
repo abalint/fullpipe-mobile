@@ -216,6 +216,10 @@ export interface MangaBlock {
   font_size: number;
   lines: number[];
   sents: number[];
+  /** One box per printed line (mokuro's line polygons), same order as
+      `lines` — present when they pair one-to-one with the read; the
+      reader then lays each line on its own glyphs (manga-layout lineStyle). */
+  line_boxes?: [number, number, number, number][];
 }
 
 export interface MangaPage {

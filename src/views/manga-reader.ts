@@ -3,10 +3,12 @@
 // invisibly over the art. The PC's OCR (tools.manga) gives every speech
 // bubble a box and its printed lines; the transcript gives the tokens; the
 // overlay lays the tokens back into the lines (manga-layout.ts blockLines)
-// as transparent spans, so the colour washes (unknown / think-you-know /
-// ★ / should-know) sit on the printed words and a tap on a word opens the
-// shared gloss popup with the shared mark cycle — marks sync live as normal
-// tap batches, lookups are recorded, all under encounter mode "manga".
+// as transparent spans, so the player's word paints (highlight.ts — the
+// global lists, high-value candidates, the i+1 target, unknowns, phrase
+// spans and grammar units, under the same off / focus / learn tiers) sit on
+// the printed words as tinted washes, and a tap on a word opens the shared
+// gloss popup with the shared mark cycle — marks sync live as normal tap
+// batches, lookups are recorded, all under encounter mode "manga".
 //
 // Reading behaviours follow the comicReader app: a reading mode — page
 // order right-to-left (default) or left-to-right, or a vertical scroll —
@@ -17,7 +19,8 @@
 // toggles the chrome), swipe to turn at 1× (the page rides with the finger
 // and springs back if the swipe doesn't commit), spreads fit to width; a
 // zoomed page only pans — never turns — so reading a panel up close can't
-// skip ahead. Always: pinch 1–5× and double-tap 1↔2× about the finger, a
+// skip ahead. Continuous: no tap zones at all (a tap toggles the chrome) —
+// the strip is scrolled, never turned. Always: pinch 1–5× and double-tap 1↔2× about the finger, a
 // pan that keeps its momentum after the finger lifts, zoom kept across page
 // turns, resume at the last page.
 // The stage holds one column element that is translated/scaled: in paged
@@ -29,11 +32,15 @@
 
 import { createGlossPopup } from "../gloss-popup";
 import type { PopupSentence } from "../gloss-popup";
+import { getSubTier, isTier, paintWordSpans, SUB_TIERS } from "../highlight";
+import type { SubTier } from "../highlight";
 import { cancelTapSync, onTapSync, scheduleTapSync } from "../livesync";
 import {
+  blockBox,
   blockLines,
   blockStyle,
   clampView,
+  lineStyle,
   DOUBLE_TAP_SCALE,
   fitPage,
   slotAnchor,
@@ -49,6 +56,8 @@ import {
   zoomAbout,
 } from "../manga-layout";
 import type { Fit, Slot, Strip, View } from "../manga-layout";
+import { glyphSpanBox, lineGlyphs } from "../manga-ink";
+import type { LineGlyphs } from "../manga-ink";
 import {
   continuousScroll,
   downloadManga,
@@ -72,11 +81,9 @@ import {
   fetchPaint,
   getCachedPaint,
   grammarListsFor,
-  listClass,
   listsFor,
   lookupListOf,
   NO_LISTS,
-  paintsInterest,
   phraseListsFor,
   sameLists,
 } from "../paint";
@@ -85,7 +92,6 @@ import { NO_LOOKUP } from "../prep-render";
 import {
   getOutbox,
   getSubmitted,
-  getTaps,
   pendingTapCount,
   pendingWatched,
   queueWatched,
@@ -94,7 +100,24 @@ import {
 import { flushOutbox } from "../sync";
 import type { Definitions, MangaDoc, MangaPage, TranscriptDoc, TranscriptSentence } from "../types";
 
-const HL_KEY = "fp.manga.hl"; // "off" = washes hidden
+const HL_KEY = "fp.manga.hl"; // highlight tier for pages: off / focus / learn
+const TIER_LABEL: Record<SubTier, string> = { off: "◨ off", focus: "◨ focus", learn: "◨ learn" };
+
+/** The reader's highlight tier — the player's three tiers, remembered for
+    pages on their own (reading a page up close wants a different amount of
+    paint than glancing at a subtitle). Starts from the player's tier; the
+    old on/off toggle's values read as learn / off. */
+export function getMangaTier(): SubTier {
+  const raw = localStorage.getItem(HL_KEY);
+  if (isTier(raw)) return raw;
+  if (raw === "on") return "learn";
+  if (raw === "off") return "off";
+  return getSubTier();
+}
+
+export function setMangaTier(tier: SubTier): void {
+  localStorage.setItem(HL_KEY, tier);
+}
 const TEXT_KEY = "fp.manga.text"; // "on" = OCR text shown (checking the read)
 const TAP_MS = 300; // max press for a tap; double-tap window
 const TAP_SLOP = 10; // px of movement that still counts as a tap
@@ -126,8 +149,8 @@ export function mangaReaderView(episodeId: string): HTMLElement {
   const back = el("a", "mg-btn", "‹") as HTMLAnchorElement;
   back.href = "#/pages";
   const titleEl = el("div", "mg-title");
-  const hlBtn = el("button", "mg-btn", "◨") as HTMLButtonElement;
-  hlBtn.title = "highlights";
+  const hlBtn = el("button", "mg-btn mg-tier", "◨") as HTMLButtonElement;
+  hlBtn.title = "highlights: off / focus (lists, high-value, the i+1 target) / learn (+ every unknown)";
   const textBtn = el("button", "mg-btn", "T") as HTMLButtonElement;
   textBtn.title = "show OCR text";
   const modeBtn = el("button", "mg-btn", "⇄") as HTMLButtonElement;
@@ -149,13 +172,15 @@ export function mangaReaderView(episodeId: string): HTMLElement {
   root.append(stage, top, bottom);
 
   const syncHl = () => {
-    const off = localStorage.getItem(HL_KEY) === "off";
-    root.classList.toggle("no-hl", off);
-    hlBtn.classList.toggle("on", !off);
+    const tier = getMangaTier();
+    hlBtn.textContent = TIER_LABEL[tier];
+    hlBtn.classList.toggle("on", tier !== "off");
   };
   hlBtn.addEventListener("click", () => {
-    localStorage.setItem(HL_KEY, root.classList.contains("no-hl") ? "on" : "off");
+    const i = SUB_TIERS.indexOf(getMangaTier());
+    setMangaTier(SUB_TIERS[(i + 1) % SUB_TIERS.length]);
     syncHl();
+    paintTaps();
   });
   const syncText = () => {
     const on = localStorage.getItem(TEXT_KEY) === "on";
@@ -173,6 +198,9 @@ export function mangaReaderView(episodeId: string): HTMLElement {
   let doc: MangaDoc | null = null;
   let sentences: TranscriptSentence[] = [];
   let lists: PaintLists = NO_LISTS;
+  // the transcript's ranked candidates — the volume's high-value words
+  // (pink at focus and above), like the player's
+  let highValue = new Set<string>();
   let snapshot: ListSnapshot & Pick<TranscriptDoc, "grammar_points"> = {};
   let defs: Definitions = {};
   let mode: ReadingMode = "rtl";
@@ -192,6 +220,11 @@ export function mangaReaderView(episodeId: string): HTMLElement {
     f: number; // the overlay's page px → css px when last rendered
   }
   const mounted = new Map<number, Mounted>();
+  /** Measured glyph runs per page (manga-ink.ts): block index → one entry
+      per printed line (null where the scan showed no ink). In page px, so
+      they survive re-layout and remounting. */
+  type PageGlyphs = Map<number, (LineGlyphs | null)[]>;
+  const glyphCache = new Map<number, PageGlyphs>();
 
   const popup = createGlossPopup({
     episodeId,
@@ -216,21 +249,22 @@ export function mangaReaderView(episodeId: string): HTMLElement {
   root.appendChild(popup.el);
 
   // --- paint -----------------------------------------------------------------------
-  const paintTaps = () => {
-    const taps = getTaps(episodeId);
-    const submitted = getSubmitted(episodeId);
-    lists = listsFor(getCachedPaint(episodeId), snapshot);
-    column.querySelectorAll<HTMLElement>(".w[data-lemma]").forEach((w) => {
-      const lemma = w.dataset.lemma!;
-      const mark = taps[lemma];
-      const lc = listClass(lemma, lists);
-      w.classList.toggle("hl-know", lc === "hl-know");
-      w.classList.toggle("hl-int", lc === "hl-int");
-      w.classList.toggle("hl-sk", lc === "hl-sk");
-      w.classList.toggle("tap-k", mark === "k");
-      w.classList.toggle("tap-h", paintsInterest(mark, lemma, lists.interest));
-      w.classList.toggle("tap-u", mark === "u");
-      w.classList.toggle("tap-committed", mark !== undefined && submitted[lemma] === mark);
+  /** Repaint every span on the mounted pages in place (highlight.ts — the
+      player's pass): the global lists are recomputed, each word's paint
+      re-derived from its sentence (phrase span › grammar unit › the word),
+      the tap marks layered on top. `root` narrows it to one page's overlay
+      (a page being laid before its box joins the column). */
+  const paintTaps = (root: ParentNode = column) => {
+    const paint = getCachedPaint(episodeId);
+    lists = listsFor(paint, snapshot);
+    paintWordSpans(root, (w) => sentences[Number(w.dataset.si)], {
+      episodeId,
+      tier: getMangaTier(),
+      lists,
+      phraseLists: phraseListsFor(paint),
+      grammarLists: grammarListsFor(paint),
+      highValue,
+      submitted: getSubmitted(episodeId),
     });
   };
 
@@ -293,48 +327,106 @@ export function mangaReaderView(episodeId: string): HTMLElement {
     if (continuous) syncStrip();
   };
 
+  /** Measure where the printed glyphs of every boxed line on a page are
+      (manga-ink.ts), from the scan that just loaded. A canvas the webview
+      won't let us read (or none at all — tests) measures nothing and the
+      OCR boxes stand. */
+  const measurePage = (im: HTMLImageElement, p: MangaPage): PageGlyphs => {
+    const out: PageGlyphs = new Map();
+    if (!im.naturalWidth || !im.naturalHeight) return out;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = im.naturalWidth;
+      canvas.height = im.naturalHeight;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return out;
+      ctx.drawImage(im, 0, 0);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const scale = p.w ? im.naturalWidth / p.w : 1;
+      p.blocks.forEach((b, bi) => {
+        const lines = blockLines(b, sentences);
+        if (!b.line_boxes || b.line_boxes.length !== lines.length) return;
+        out.set(bi, b.line_boxes.map((box, li) => {
+          const text = lines[li].map((fr) => fr.text).join("");
+          return lineGlyphs(img, box, text, b.vertical, scale);
+        }));
+      });
+    } catch {
+      /* tainted canvas / no 2d context: the boxes will do */
+    }
+    return out;
+  };
+
   /** Lay a page's bubbles over its art: one absolutely positioned block per
       bubble, one line element per printed line, token fragments as the
       tappable spans. Everything is sized at scale 1 (page px × f) — the
-      column's transform scales it with the art. */
-  const renderBlocks = (p: MangaPage, f: number, overlay: HTMLElement) => {
+      column's transform scales it with the art. A bubble whose lines came
+      with their own OCR boxes lays each line on its box (lineStyle), and
+      once the scan has been measured each fragment sits on its own glyphs
+      (manga-ink.ts); otherwise the lines share the bubble box across its
+      writing axis. */
+  const renderBlocks = (p: MangaPage, f: number, overlay: HTMLElement, glyphs?: PageGlyphs) => {
     overlay.textContent = "";
-    for (const b of p.blocks) {
+    p.blocks.forEach((b, bi) => {
       const st = blockStyle(b, f);
-      const blk = el("div", `mg-block${st.vertical ? " v" : " h"}`);
+      const lines = blockLines(b, sentences);
+      const boxes = b.line_boxes && b.line_boxes.length === lines.length ? b.line_boxes : null;
+      const blk = el("div", `mg-block${st.vertical ? " v" : " h"}${boxes ? " lined" : ""}`);
       blk.style.left = `${st.left}px`;
       blk.style.top = `${st.top}px`;
       blk.style.width = `${st.width}px`;
       blk.style.height = `${st.height}px`;
       blk.style.fontSize = `${st.fontSize}px`;
       blk.style.lineHeight = `${st.lineSize}px`;
-      for (const line of blockLines(b, sentences)) {
+      const origin: [number, number] = [blockBox(b)[0], blockBox(b)[1]];
+      const place = (n: HTMLElement, box: [number, number, number, number], chars: number, org: [number, number]) => {
+        const ls = lineStyle(box, chars, b.vertical, f, org);
+        n.style.left = `${ls.left}px`;
+        n.style.top = `${ls.top}px`;
+        n.style.width = `${ls.width}px`;
+        n.style.height = `${ls.height}px`;
+        n.style.fontSize = `${ls.fontSize}px`;
+        n.style.lineHeight = `${b.vertical ? ls.width : ls.height}px`;
+        n.style.letterSpacing = `${ls.letterSpacing}px`;
+      };
+      lines.forEach((line, li) => {
         const ln = el("p", "mg-line");
+        const chars = line.reduce((n, fr) => n + fr.text.length, 0);
+        const g = boxes ? glyphs?.get(bi)?.[li] : undefined;
+        const measured = !!boxes && !!g && g.runs.length === chars;
+        if (boxes) place(ln, boxes[li], chars, origin);
+        if (measured) ln.classList.add("glyphs");
+        const lineOrigin: [number, number] = boxes ? [boxes[li][0], boxes[li][1]] : origin;
+        let c = 0; // characters of the line placed so far
         for (const fr of line) {
           const t = fr.token;
           const tappable = !!t.l && !NO_LOOKUP.test(t.l);
-          if (!tappable) {
+          const c0 = c;
+          c += fr.text.length;
+          if (!tappable && !measured) {
             ln.appendChild(document.createTextNode(fr.text));
             continue;
           }
-          const n = el("span", `w${t.c && !t.k ? " unk" : ""}`, fr.text);
-          n.dataset.lemma = t.l!;
-          n.dataset.si = String(fr.si);
-          n.dataset.ti = String(fr.ti);
-          const lc = listClass(t.l, lists);
-          if (lc) n.classList.add(lc);
+          const n = el("span", tappable ? "w" : "mg-t", fr.text); // .w painted by paintTaps
+          if (tappable) {
+            n.dataset.lemma = t.l!;
+            n.dataset.si = String(fr.si);
+            n.dataset.ti = String(fr.ti);
+          }
+          // measured: the fragment sits on exactly its glyphs' ink
+          if (measured) place(n, glyphSpanBox(g!, c0, c, b.vertical), fr.text.length, lineOrigin);
           ln.appendChild(n);
         }
         blk.appendChild(ln);
-      }
+      });
       overlay.appendChild(blk);
-    }
+    });
   };
 
   /** Re-lay every mounted page's bubbles (the paint or the transcript changed). */
   const renderOverlay = () => {
     if (!doc) return;
-    for (const [i, m] of mounted) renderBlocks(doc.pages[i], m.f, m.overlay);
+    for (const [i, m] of mounted) renderBlocks(doc.pages[i], m.f, m.overlay, glyphCache.get(i));
     paintTaps();
   };
 
@@ -347,8 +439,8 @@ export function mangaReaderView(episodeId: string): HTMLElement {
     m.box.style.height = `${slot.h}px`;
     if (m.f !== slot.f) {
       m.f = slot.f;
-      renderBlocks(doc!.pages[i], slot.f, m.overlay);
-      paintTaps();
+      renderBlocks(doc!.pages[i], slot.f, m.overlay, glyphCache.get(i));
+      paintTaps(m.overlay);
     }
   };
 
@@ -372,6 +464,16 @@ export function mangaReaderView(episodeId: string): HTMLElement {
         p.w = im.naturalWidth;
         p.h = im.naturalHeight;
         relayout();
+      }
+      // first sight of the scan: measure the lettering, then lay the
+      // spans on the glyphs (once per page — the runs are in page px)
+      if (!glyphCache.has(i) && p.blocks.some((b) => b.line_boxes)) {
+        const g = measurePage(im, p);
+        glyphCache.set(i, g);
+        if (g.size && mounted.get(i) === m) {
+          renderBlocks(p, m.f, m.overlay, g);
+          paintTaps(m.overlay);
+        }
       }
     });
     pageImageSrc(episodeId, p.file).then(
@@ -778,7 +880,9 @@ export function mangaReaderView(episodeId: string): HTMLElement {
     lastTap = { x: p.x, y: p.y, t: now };
     tapTimer = window.setTimeout(() => {
       lastTap = null;
-      if (!continuous && view.s > 1.01) {
+      // a zoomed page only pans, and a continuous strip is only ever
+      // scrolled — a tap on either just shows / hides the chrome
+      if (continuous || view.s > 1.01) {
         toggleChrome();
         return;
       }
@@ -823,6 +927,7 @@ export function mangaReaderView(episodeId: string): HTMLElement {
       applyPaintKnown(sentences, paint);
       snapshot = transcript ?? {};
       lists = listsFor(paint, snapshot);
+      highValue = new Set(transcript?.candidates ?? []);
       defs = (await loadLocalMangaDefinitions(episodeId)) ?? {};
       if (!doc || !doc.pages.length) throw new Error("volume bundle incomplete — re-download");
       mode = readingMode(doc.slug, doc.reading === "ltr" ? "ltr" : "rtl");
@@ -852,6 +957,7 @@ export function mangaReaderView(episodeId: string): HTMLElement {
           applyPaintKnown(sentences, st);
           snapshot = fresh;
           lists = listsFor(st, snapshot);
+          highValue = new Set(fresh.candidates ?? []);
           defs = (await loadLocalMangaDefinitions(episodeId)) ?? defs;
           if (doc) slider.max = String(doc.page_count - 1);
           relayout(); // page sizes / bubbles may have changed with the read

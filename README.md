@@ -24,8 +24,10 @@ src/
 ├── listfilter.ts      sort + status/genre/on-phone filters shared by the Queue and Listen tabs
 ├── nowplaying.ts      now-playing strip above the nav → back to the episode the audio service is playing
 ├── paint.ts           live highlight state (GET /paint) overlaid on cached sidecars
+├── highlight.ts       the word-paint pass shared by the player and the manga reader (tiers · lists · phrase / grammar units)
 ├── manga.ts           manga bundles (structure + tokens + dictionary + page scans) · reading-time recorder
 ├── manga-layout.ts    reader geometry: fit / zoom bounds / tap zones / continuous strip · bubble tokens → printed lines
+├── manga-ink.ts       reader ink measurement: a line's glyph runs from the scan's pixels, so spans sit on the printed characters
 ├── prep-render.ts     token / ruby markup shared by the player overlay, popup and reader
 ├── share.ts           JS side of the share-sheet target
 ├── views/             queue · player · passive · pages (the Read tab: manga + 5ch) · reader (5ch) · manga-reader · stats · confirm · settings
@@ -245,7 +247,8 @@ pages/*.jpg}`, resumable — and 📖 opens `views/manga-reader.ts`:
   one strip (fit to the width when vertical, to the height otherwise) that
   scrolls and flings with the finger, versus one page at a time; both are
   remembered per series and become the default for the next series
-  (`manga.ts readingMode / continuousScroll`). Paged: tap the far side in
+  (`manga.ts readingMode / continuousScroll`). Continuous: a tap only
+  toggles the chrome, never turns. Paged: tap the far side in
   the reading direction to turn forward, the near side to go back (top /
   bottom thirds when vertical), the centre to toggle the chrome; swipe to
   turn (the page rides with the finger and springs back if the swipe
@@ -260,11 +263,26 @@ pages/*.jpg}`, resumable — and 📖 opens `views/manga-reader.ts`:
   transcript on the next open (`SIDECAR_FORMAT` 9), and each glossed
   bubble's meaning shows at the foot of the popup under a "line" tag;
 - every speech bubble's tokens are laid back into its printed lines as
-  transparent spans (`manga-layout.ts blockLines`, by character count), so
-  the usual washes — orange unknown, blue think-you-know, purple ★, green
-  should-know, ✓/★/✗ marks — sit on the printed words and a tap opens the
-  shared gloss popup with the shared mark cycle (encounter mode `manga`);
-  `◨` hides the washes, `T` shows the OCR text over the bubbles;
+  transparent spans (`manga-layout.ts blockLines`, by character count) and
+  each line onto its own OCR box (`line_boxes` from mokuro's line polygons,
+  `SIDECAR_FORMAT` 10 — `lineStyle` sizes the glyphs to the line's pitch and
+  spreads them with letter-spacing so each lands on the printed one; a
+  bubble whose polygons don't pair with the read shares its box evenly).
+  The OCR boxes are loose, so once a page's scan has loaded the reader
+  measures the lettering itself (`manga-ink.ts`: the line's pixels
+  projected onto its axis, cut into ink runs, reconciled with the read's
+  character count — a … merges, a ‼ splits) and pins every fragment to its
+  own glyphs' ink; a line the scan shows no ink for keeps its box. So
+  the player's paints (`highlight.ts`, the one pass both surfaces run) sit
+  on the printed words as tinted washes: blue think-you-know, purple ★,
+  green should-know, pink high value (the transcript's ranked candidates),
+  orange for the bubble's i+1 target (boxed) and, at the learn tier, every
+  unknown; a phrase span washes as one unit in the phrase's state and a
+  grammar unit in the pattern's, with the player's dotted marker along its
+  reading side; a ✓ paints nothing (known is the absence of colour, as under the video), ★/✗ marks add a bar. `◨` cycles the player's tiers —
+  off / focus (lists, high value, the target) / learn (+ every unknown) —
+  remembered for pages on their own (`fp.manga.hl`, starting from the
+  player's tier); `T` shows the OCR text over the bubbles;
 - time on each page is a viewtime sitting (`manga.ts ReadRecorder`) whose
   played ranges are page spans in the transcript's pseudo-seconds (page × 30),
   so the server credits exposures for exactly the pages read and the

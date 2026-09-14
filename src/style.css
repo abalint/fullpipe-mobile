@@ -704,27 +704,43 @@ button.more { display: block; margin: 12px auto 24px; }
 .mg-line { margin: 0; padding: 0; white-space: nowrap; }
 .mg-block.v .mg-line { height: 100%; }
 .mg-block.h .mg-line { width: 100%; }
+/* a bubble with per-line OCR boxes: each line sits on its own glyphs
+   (manga-layout lineStyle sets box, glyph size and letter-spacing inline) */
+.mg-block.lined .mg-line { position: absolute; overflow: visible; }
+/* …and once the scan has been measured (manga-ink.ts), each fragment sits
+   on its own glyphs' ink, so a wash covers exactly the printed characters */
+.mg-line.glyphs > span { position: absolute; }
 .mg-block .w { cursor: pointer; border-radius: 3px; padding: 0; }
-/* washes: soft tints that ride under the printed glyphs — meant to stay on
-   while reading, so they hint rather than shout. The user's own marks add a
-   thin bar on the reading side of the word (right of a vertical column). */
-.mg-block .w.unk { background: rgba(255, 150, 50, .22); }
+/* washes: the player's paints (highlight.ts) as soft tints that ride under
+   the printed glyphs — meant to stay on while reading, so they hint rather
+   than shout. Same hues as the subtitle overlay: orange = you don't know
+   this (learn tier; the i+1 target boxed), pink = high value in this
+   volume, blue / purple / green = the global lists. A ✓ paints nothing —
+   known is the absence of colour, as under the video; ★ / ✗ marks add a
+   thin bar on the reading side of the word (right of a vertical column);
+   a grammar unit carries the player's dotted marker along its reading
+   side, coloured like its wash. */
+.mg-block .w.hl-unk { background: rgba(255, 150, 50, .22); }
+.mg-block .w.hl-target { background: rgba(255, 150, 50, .3);
+                         outline: 1.5px solid rgba(255, 160, 64, .9); outline-offset: -1px; }
+.mg-block .w.kw, .mg-block .w.hl-hv { background: rgba(255, 122, 184, .24); }
 .mg-block .w.hl-know { background: rgba(90, 190, 255, .22); }
 .mg-block .w.hl-int { background: rgba(180, 120, 255, .26); }
 .mg-block .w.hl-sk { background: rgba(90, 220, 110, .22); }
-.mg-block .w.tap-k { background: rgba(77, 191, 127, .18); box-shadow: 2px 0 0 rgba(77, 191, 127, .85); }
+.mg-block .w.gr { text-decoration: underline dotted 1.5px; text-underline-offset: 1px;
+                  text-decoration-color: rgba(0, 0, 0, .55); }
+.mg-block.v .w.gr { text-underline-position: right; }
+.mg-block .w.gr.hl-unk, .mg-block .w.gr.hl-target { text-decoration-color: rgba(255, 140, 30, .95); }
+.mg-block .w.gr.hl-know { text-decoration-color: rgba(60, 170, 255, .95); }
+.mg-block .w.gr.hl-int { text-decoration-color: rgba(170, 100, 255, .95); }
+.mg-block .w.tap-k { background: none; box-shadow: none; outline: none; text-decoration: none; }
 .mg-block .w.tap-h { background: rgba(180, 120, 255, .26); box-shadow: 2px 0 0 rgba(180, 120, 255, .95); }
 .mg-block .w.tap-u { background: rgba(255, 150, 50, .26); box-shadow: 2px 0 0 rgba(255, 150, 50, .95); }
-.mg-block.h .w.tap-k, .mg-block.h .w.tap-h, .mg-block.h .w.tap-u { box-shadow: 0 2px 0 currentColor; }
-.mg-block.h .w.tap-k { color: rgba(77, 191, 127, .85); }
+.mg-block.h .w.tap-h, .mg-block.h .w.tap-u { box-shadow: 0 2px 0 currentColor; }
 .mg-block.h .w.tap-h { color: rgba(180, 120, 255, .95); }
 .mg-block.h .w.tap-u { color: rgba(255, 150, 50, .95); }
 .mg-block .w.tap-h::after, .mg-block .w.tap-u::after { content: none; }
 .mg-block .w.tap-committed { opacity: .9; }
-.manga-view.no-hl .mg-block .w.unk,
-.manga-view.no-hl .mg-block .w.hl-know,
-.manga-view.no-hl .mg-block .w.hl-int,
-.manga-view.no-hl .mg-block .w.hl-sk { background: none; }
 /* T: show what the OCR read (checking a bubble, or an unreadable scan) */
 .manga-view.show-text .mg-block { color: #fff; background: rgba(0,0,0,.72); }
 .manga-view.show-text .mg-block .w { color: #fff; }
@@ -745,6 +761,7 @@ button.more { display: block; margin: 12px auto 24px; }
           border-radius: 8px; border: 1px solid #444; background: rgba(30,30,30,.7);
           color: #ddd; text-decoration: none; cursor: pointer; }
 .mg-btn.on { border-color: var(--accent); color: var(--accent); }
+.mg-btn.mg-tier { white-space: nowrap; }
 .mg-done { color: #7ee787; }
 .mg-sync { font-size: .8rem; color: var(--accent); }
 .mg-slider { flex: 1; accent-color: var(--accent); }
