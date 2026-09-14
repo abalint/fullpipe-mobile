@@ -361,7 +361,7 @@ describe("statsView", () => {
     document.body.appendChild(root);
     await vi.waitFor(() => expect(root.querySelectorAll(".ledger .stat-tile").length).toBe(4));
     // the immersion-time section sits above the ledger tiles, own tiles + empty state
-    expect(root.querySelectorAll(".viewtime .stat-tile").length).toBe(4);
+    expect(root.querySelectorAll(".viewtime .stat-tile").length).toBe(5);
     expect(root.querySelector(".viewtime")!.textContent).toContain("Nothing recorded yet");
     // top-1000 tile shows 95% (948/1000)
     expect(root.textContent).toContain("95%");

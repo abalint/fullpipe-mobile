@@ -18,9 +18,11 @@ export interface Job {
   episode_id: string;
   source: string;
   title?: string;
-  /** "page" rows (page_ id prefix server-side) live on the Pages tab and are
-      read, not played; absent (pre-pages server) means episode. */
-  kind?: "episode" | "page";
+  /** "page" rows (page_ id prefix server-side) and "manga" rows (manga_ —
+      a volume from the PC library, tools.manga) live on the Read tab and are
+      read, not played; absent (pre-pages server) means episode. Manga rows
+      also carry series / series_title / ep_no (the volume number). */
+  kind?: "episode" | "page" | "manga";
   state: JobState;
   passive?: boolean; // shelved into the passive-listening collection
   progress?: number; // 0..1 within the current state, if the worker reports it
@@ -109,6 +111,9 @@ export interface TranscriptSentence {
   tokens: Token[];
   grammar?: SentenceGrammar[]; // curated line context — absent until curation
   phrases?: SentencePhrase[];
+  /** The curate pass's plain-English meaning of the whole line (manga
+      pass `lines`: hard / slangy bubbles) — the popup's foot. */
+  gloss?: string;
 }
 
 /** GET /transcript/{id} — every sentence, unlike prep's i+1 subset. */
@@ -198,6 +203,65 @@ export interface PageDoc {
   board?: string;
   post_count: number;
   posts: PagePost[];
+}
+
+/** One speech bubble (mokuro text block) on a manga page: its box in page
+    pixels, writing direction, OCR font size, the character count of each
+    printed line, and its sentences as a run of idxs into /transcript. The
+    reader lays the transcript's tokens back into the lines, invisible,
+    over the original art — colour washes + taps land on the printed words. */
+export interface MangaBlock {
+  box: [number, number, number, number]; // x1, y1, x2, y2
+  vertical: boolean;
+  font_size: number;
+  lines: number[];
+  sents: number[];
+}
+
+export interface MangaPage {
+  n: number;
+  file: string;
+  w: number;
+  h: number;
+  blocks: MangaBlock[];
+}
+
+/** GET /manga/{id} — the reader structure of one volume (tools.manga). */
+export interface MangaDoc {
+  episode_id: string;
+  slug: string;
+  title: string;
+  series_title: string;
+  vol_no: number;
+  label?: string;
+  reading: "rtl" | "ltr";
+  /** Pseudo-seconds per page: sentence.start = page index × page_secs, so a
+      sitting's played ranges (viewtime) say which pages were read. */
+  page_secs: number;
+  page_count: number;
+  pages: MangaPage[];
+}
+
+/** GET /manga/library — the PC's manga folder, with queue state per volume. */
+export interface MangaLibraryVolume {
+  vol_no: number;
+  label: string;
+  pages: number;
+  id: string;
+  state: JobState | null;
+}
+
+export interface MangaLibrarySeries {
+  name: string;
+  slug: string;
+  remote_dir: string;
+  volumes: MangaLibraryVolume[];
+}
+
+export interface MangaLibrary {
+  root: string;
+  at: number;
+  series: MangaLibrarySeries[];
 }
 
 export interface GlossEntry {
@@ -334,7 +398,7 @@ export type SubState = "on" | "kw" | "off" | "audio";
 
 /** Where a word was met when it was looked up or marked: a player state,
     the Listen tab, a 5ch page, the prep doc. */
-export type EncounterMode = SubState | "listen" | "page" | "prep";
+export type EncounterMode = SubState | "listen" | "page" | "prep" | "manga";
 
 /** One item's popup opens in an episode, cumulative: [key, n, {list: n}] for
     a word, with a trailing "phrase" for a phrase-layer headword. Sent whole
@@ -378,7 +442,9 @@ export const FOLLOW_OPTIONS: [state: FollowState, label: string][] = [
 /** Where playback time was spent: the in-app player (active watching) or
     the background passive-audio service (passive listening). Kept apart —
     they are different kinds of exposure. */
-export type ViewKind = "watch" | "listen";
+/** watch = the player (active) · listen = background audio (passive) ·
+    read = the manga reader (active, tallied on its own). */
+export type ViewKind = "watch" | "listen" | "read";
 
 /** Where a sitting came from: recorded by the app (absent = app), typed in
     by hand on the Progress tab, or imported from the pre-app spreadsheet

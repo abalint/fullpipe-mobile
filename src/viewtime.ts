@@ -237,6 +237,7 @@ export interface DayTime {
   day: string;
   watch: number;
   listen: number;
+  read: number; // the manga reader — active, kept apart from watching
   episodes: EpisodeTime[]; // longest first
 }
 
@@ -245,6 +246,7 @@ export interface WeekTime {
   end: string; // Saturday
   watch: number;
   listen: number;
+  read: number;
   days: DayTime[]; // newest first
 }
 
@@ -255,8 +257,8 @@ export function groupWeeks(segs: ViewSegment[]): WeekTime[] {
   const rows = new Map<string, EpisodeTime>(); // `${day}#${rowKey}` → row
   for (const s of segs) {
     let d = days.get(s.day);
-    if (!d) days.set(s.day, (d = { day: s.day, watch: 0, listen: 0, episodes: [] }));
-    d[s.kind] += s.secs;
+    if (!d) days.set(s.day, (d = { day: s.day, watch: 0, listen: 0, read: 0, episodes: [] }));
+    d[s.kind === "read" ? "read" : s.kind === "listen" ? "listen" : "watch"] += s.secs;
     const key = `${s.day}#${rowKey(s)}`;
     let e = rows.get(key);
     if (!e) {
@@ -278,9 +280,10 @@ export function groupWeeks(segs: ViewSegment[]): WeekTime[] {
     d.episodes.sort((a, b) => b.secs - a.secs);
     const start = weekStart(d.day);
     let w = weeks.get(start);
-    if (!w) weeks.set(start, (w = { start, end: addDays(start, 6), watch: 0, listen: 0, days: [] }));
+    if (!w) weeks.set(start, (w = { start, end: addDays(start, 6), watch: 0, listen: 0, read: 0, days: [] }));
     w.watch += d.watch;
     w.listen += d.listen;
+    w.read += d.read;
     w.days.push(d);
   }
   const out = [...weeks.values()];
@@ -325,7 +328,7 @@ export function manualSegment(
   return {
     id: newId(),
     episode_id: "manual",
-    title: what.trim() || (kind === "listen" ? "listening outside the app" : "watching outside the app"),
+    title: what.trim() || (kind === "listen" ? "listening outside the app" : kind === "read" ? "reading outside the app" : "watching outside the app"),
     kind,
     day,
     start: new Date().toISOString(),

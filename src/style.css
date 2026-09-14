@@ -669,3 +669,85 @@ button.more { display: block; margin: 12px auto 24px; }
 .upnext .muted { color: #bbb; }
 .upnext .upnext-title { font-size: 1.05rem; font-weight: 600; }
 .upnext .btnrow { justify-content: center; flex-wrap: wrap; }
+
+/* --- Read tab: manga (manga.ts / views/pages.ts) ------------------------------ */
+.mg-library { background: var(--card); border-radius: 10px; padding: 8px 12px;
+              margin-bottom: 12px; }
+.mg-library .toolbar { margin-bottom: 4px; }
+.mg-library .series-title { flex: 1; font-weight: 600; }
+.mg-library .series { margin: 6px 0; }
+.mg-library .job { background: var(--bg); }
+
+/* --- Manga reader (views/manga-reader.ts) -----------------------------------------
+   Full-screen over the shell (nav included): black stage, the page box
+   transformed for zoom/pan, the OCR overlay laid over the art, chrome bars
+   that slide away on a centre tap. */
+.manga-view { position: fixed; inset: 0; z-index: 30; background: #000; color: #ddd;
+              display: flex; flex-direction: column; overflow: hidden;
+              -webkit-user-select: none; user-select: none; }
+.mg-stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; }
+.mg-page { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.mg-img { display: block; width: 100%; height: 100%; -webkit-user-drag: none; }
+.mg-overlay { position: absolute; inset: 0; }
+.mg-status { position: absolute; left: 50%; bottom: 72px; transform: translateX(-50%);
+             background: rgba(0,0,0,.65); color: #eee; font-size: .85rem;
+             padding: 4px 12px; border-radius: 99px; pointer-events: none; }
+.mg-status:empty { display: none; }
+
+/* a bubble: the OCR box; lines stack across the writing axis */
+.mg-block { position: absolute; overflow: hidden; color: transparent;
+            font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+            font-feature-settings: "vert" 1; }
+.mg-block.v { writing-mode: vertical-rl; text-orientation: upright; }
+.mg-block.h { writing-mode: horizontal-tb; }
+.mg-line { margin: 0; padding: 0; white-space: nowrap; }
+.mg-block.v .mg-line { height: 100%; }
+.mg-block.h .mg-line { width: 100%; }
+.mg-block .w { cursor: pointer; border-radius: 3px; padding: 0; }
+/* washes: soft tints that ride under the printed glyphs — meant to stay on
+   while reading, so they hint rather than shout. The user's own marks add a
+   thin bar on the reading side of the word (right of a vertical column). */
+.mg-block .w.unk { background: rgba(255, 150, 50, .22); }
+.mg-block .w.hl-know { background: rgba(90, 190, 255, .22); }
+.mg-block .w.hl-int { background: rgba(180, 120, 255, .26); }
+.mg-block .w.hl-sk { background: rgba(90, 220, 110, .22); }
+.mg-block .w.tap-k { background: rgba(77, 191, 127, .18); box-shadow: 2px 0 0 rgba(77, 191, 127, .85); }
+.mg-block .w.tap-h { background: rgba(180, 120, 255, .26); box-shadow: 2px 0 0 rgba(180, 120, 255, .95); }
+.mg-block .w.tap-u { background: rgba(255, 150, 50, .26); box-shadow: 2px 0 0 rgba(255, 150, 50, .95); }
+.mg-block.h .w.tap-k, .mg-block.h .w.tap-h, .mg-block.h .w.tap-u { box-shadow: 0 2px 0 currentColor; }
+.mg-block.h .w.tap-k { color: rgba(77, 191, 127, .85); }
+.mg-block.h .w.tap-h { color: rgba(180, 120, 255, .95); }
+.mg-block.h .w.tap-u { color: rgba(255, 150, 50, .95); }
+.mg-block .w.tap-h::after, .mg-block .w.tap-u::after { content: none; }
+.mg-block .w.tap-committed { opacity: .9; }
+.manga-view.no-hl .mg-block .w.unk,
+.manga-view.no-hl .mg-block .w.hl-know,
+.manga-view.no-hl .mg-block .w.hl-int,
+.manga-view.no-hl .mg-block .w.hl-sk { background: none; }
+/* T: show what the OCR read (checking a bubble, or an unreadable scan) */
+.manga-view.show-text .mg-block { color: #fff; background: rgba(0,0,0,.72); }
+.manga-view.show-text .mg-block .w { color: #fff; }
+
+/* chrome */
+.mg-bar { position: absolute; left: 0; right: 0; z-index: 2; display: flex;
+          align-items: center; gap: 6px; padding: 8px 10px;
+          background: linear-gradient(rgba(0,0,0,.75), rgba(0,0,0,0));
+          transition: transform .18s ease, opacity .18s ease; }
+.mg-top { top: 0; padding-top: calc(8px + env(safe-area-inset-top)); }
+.mg-bottom { bottom: 0; padding-bottom: calc(10px + env(safe-area-inset-bottom));
+             background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.75)); }
+.manga-view.chrome-hidden .mg-top { transform: translateY(-100%); opacity: 0; }
+.manga-view.chrome-hidden .mg-bottom { transform: translateY(100%); opacity: 0; }
+.mg-title { flex: 1; min-width: 0; font-size: .9rem; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; }
+.mg-btn { font: inherit; font-size: .95rem; line-height: 1; padding: 8px 10px;
+          border-radius: 8px; border: 1px solid #444; background: rgba(30,30,30,.7);
+          color: #ddd; text-decoration: none; cursor: pointer; }
+.mg-btn.on { border-color: var(--accent); color: var(--accent); }
+.mg-done { color: #7ee787; }
+.mg-sync { font-size: .8rem; color: var(--accent); }
+.mg-slider { flex: 1; accent-color: var(--accent); }
+.manga-view.rtl .mg-slider { direction: ltr; } /* value already mirrored in code */
+.mg-counter { font-variant-numeric: tabular-nums; font-size: .85rem; min-width: 5ch;
+              text-align: right; }
+.gloss-pop.mg-pop { bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 40; }

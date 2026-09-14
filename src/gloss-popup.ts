@@ -47,6 +47,7 @@ export interface PopupSentence {
   tokens?: Token[];
   grammar?: SentenceGrammar[];
   phrases?: SentencePhrase[];
+  gloss?: string; // the curate pass's meaning of the whole line, when authored
 }
 
 export interface GlossPopupOptions {
@@ -336,8 +337,17 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
       row.appendChild(markButton(phraseTapKey(p.canonical), lists.interest.has(p.canonical)));
       word.appendChild(row);
     }
+    // the whole line, when the curate pass judged it needed saying (manga
+    // bubbles in slang / contractions: word + grammar layers alone don't
+    // add up to "what did they just say")
+    if (sentence?.gloss) {
+      const row = el("div", "gp-line-note gp-line-gloss");
+      row.appendChild(el("span", "gp-tag", "line"));
+      row.appendChild(el("span", "gp-gloss", sentence.gloss));
+      word.appendChild(row);
+    }
     if (!info && !entries.length && !infl && !covering.length &&
-        !sentence?.grammar?.length && !sentence?.phrases?.length)
+        !sentence?.grammar?.length && !sentence?.phrases?.length && !sentence?.gloss)
       word.appendChild(el("div", "gp-none", "no dictionary entry"));
     pop.appendChild(word);
     pop.style.display = "";

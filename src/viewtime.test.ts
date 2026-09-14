@@ -330,7 +330,7 @@ describe("renderViewtime", () => {
     expect(dayLabel("2026-09-02", today)).toMatch(/^Today · /);
     expect(dayLabel("2026-09-01", today)).toMatch(/^Yesterday · /);
     expect(dayLabel("2026-08-30", today)).not.toMatch(/Today|Yesterday/);
-    const w = { start: "2026-08-30", end: "2026-09-05", watch: 0, listen: 0, days: [] };
+    const w = { start: "2026-08-30", end: "2026-09-05", watch: 0, listen: 0, read: 0, days: [] };
     expect(weekLabel(w, today)).toMatch(/Aug 30 – Sep 5/);
     expect(weekLabel({ ...w, start: "2025-12-28", end: "2026-01-03" }, today)).toMatch(/2025/);
   });
@@ -346,7 +346,7 @@ describe("renderViewtime", () => {
     ], today);
     document.body.appendChild(root);
     const tiles = root.querySelectorAll(".stat-tile");
-    expect(tiles.length).toBe(4);
+    expect(tiles.length).toBe(5); // today · week · watched · read · listened
     // big number = active watching only; passive sits small underneath, never summed
     expect(tiles[0].querySelector(".num")!.textContent).toBe("25m"); // today: watch
     expect(tiles[0].querySelector(".sub")!.textContent).toBe("🎧 5m passive");
@@ -354,7 +354,8 @@ describe("renderViewtime", () => {
     expect(tiles[1].querySelector(".num")!.textContent).toBe("40m"); // this week: 25 + 15
     expect(tiles[1].querySelector(".sub")!.textContent).toBe("🎧 5m passive");
     expect(tiles[2].textContent).toContain("41m"); // watched all time: 25 + 15 + 1
-    expect(tiles[3].textContent).toContain("5m"); // listened all time
+    expect(tiles[3].textContent).toContain("0m"); // read all time: none yet
+    expect(tiles[4].textContent).toContain("5m"); // listened all time
 
     const weeks = root.querySelectorAll<HTMLDetailsElement>("details.week");
     expect(weeks.length).toBe(2);

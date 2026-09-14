@@ -35,19 +35,22 @@ function el(tag: string, cls?: string, text?: string): HTMLElement {
   return n;
 }
 
-const KIND_ICON = { watch: "▶", listen: "🎧" } as const;
+const KIND_ICON = { watch: "▶", listen: "🎧", read: "📖" } as const;
 
-/** "▶ 45m · 🎧 20m" — a zero side is dropped, both zero reads "0m". */
-export function splitLabel(watch: number, listen: number): string {
+/** "▶ 45m · 📖 15m · 🎧 20m" — zero sides are dropped, all zero reads "0m". */
+export function splitLabel(watch: number, listen: number, read = 0): string {
   const parts: string[] = [];
   if (watch > 0) parts.push(`${KIND_ICON.watch} ${fmtDur(watch)}`);
+  if (read > 0) parts.push(`${KIND_ICON.read} ${fmtDur(read)}`);
   if (listen > 0) parts.push(`${KIND_ICON.listen} ${fmtDur(listen)}`);
   return parts.length ? parts.join(" · ") : "0m";
 }
 
-/** The small line under the today / this-week tiles: passive time only. */
-export function passiveSub(listen: number): string {
-  return `${KIND_ICON.listen} ${fmtDur(listen)} passive`;
+/** The small line under the today / this-week tiles: how the active figure
+    splits (watching vs reading) and the passive time beside it. */
+export function passiveSub(listen: number, watch = 0, read = 0): string {
+  const active = read > 0 ? `${KIND_ICON.watch} ${fmtDur(watch)} · ${KIND_ICON.read} ${fmtDur(read)} · ` : "";
+  return `${active}${KIND_ICON.listen} ${fmtDur(listen)} passive`;
 }
 
 const MONTH_DAY = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
@@ -113,7 +116,7 @@ function dayBlock(d: DayTime, today: string, actions: ViewtimeActions): HTMLElem
   const block = el("div", "day");
   const head = el("div", "day-head");
   head.appendChild(el("span", "day-name", dayLabel(d.day, today)));
-  head.appendChild(el("span", "day-tot", splitLabel(d.watch, d.listen)));
+  head.appendChild(el("span", "day-tot", splitLabel(d.watch, d.listen, d.read)));
   block.appendChild(head);
   for (const e of d.episodes) block.appendChild(episodeRow(e, actions));
   return block;
@@ -126,7 +129,7 @@ function weekBlock(w: WeekTime, today: string, open: boolean, actions: ViewtimeA
   const det = el("details", "week") as HTMLDetailsElement;
   const sum = el("summary");
   sum.appendChild(el("span", "wk-range", weekLabel(w, today)));
-  sum.appendChild(el("span", "wk-tot", splitLabel(w.watch, w.listen)));
+  sum.appendChild(el("span", "wk-tot", splitLabel(w.watch, w.listen, w.read)));
   det.appendChild(sum);
   let built = false;
   const build = () => {
@@ -246,9 +249,9 @@ function addTimeForm(today: string, actions: ViewtimeActions): HTMLElement {
 
   let kind: ViewKind = "listen";
   const kindRow = el("div", "row kind");
-  const kindBtns = (["listen", "watch"] as ViewKind[]).map((k) => {
+  const kindBtns = (["listen", "watch", "read"] as ViewKind[]).map((k) => {
     const b = el("button", `tag${k === kind ? " on" : ""}`,
-      k === "listen" ? "🎧 listening" : "▶ watching") as HTMLButtonElement;
+      k === "listen" ? "🎧 listening" : k === "read" ? "📖 reading" : "▶ watching") as HTMLButtonElement;
     b.type = "button";
     b.dataset.kind = k;
     b.addEventListener("click", () => {
@@ -301,21 +304,25 @@ export function renderViewtime(
   const weekT = weeks.find((w) => w.start === thisWeek);
   let allWatch = 0;
   let allListen = 0;
+  let allRead = 0;
   for (const w of weeks) {
     allWatch += w.watch;
     allListen += w.listen;
+    allRead += w.read;
   }
   const grid = el("div", "stat-grid time");
-  // the big number is active watching only — that's the figure that matters;
-  // passive listening sits small underneath and is never summed into it
+  // the big number is active time — watching + reading (the split sits
+  // small underneath); passive listening is never summed into it
+  const active = (t?: { watch: number; read: number }) => (t?.watch ?? 0) + (t?.read ?? 0);
   grid.append(
-    tile(fmtDur(todayT?.watch ?? 0), "today", passiveSub(todayT?.listen ?? 0), "accent"),
-    tile(fmtDur(weekT?.watch ?? 0), "this week", passiveSub(weekT?.listen ?? 0), "accent"),
+    tile(fmtDur(active(todayT)), "today", passiveSub(todayT?.listen ?? 0, todayT?.watch, todayT?.read), "accent"),
+    tile(fmtDur(active(weekT)), "this week", passiveSub(weekT?.listen ?? 0, weekT?.watch, weekT?.read), "accent"),
     tile(fmtDur(allWatch), "watched, all time", "active — in the player", "know"),
+    tile(fmtDur(allRead), "read, all time", "active — manga reader", "know"),
     tile(fmtDur(allListen), "listened, all time", "passive — background audio", "know"),
   );
   root.appendChild(grid);
-  root.appendChild(goalCard(weekT?.watch ?? 0, today, getViewGoal(), (g) => {
+  root.appendChild(goalCard(active(weekT), today, getViewGoal(), (g) => {
     saveViewGoal(g);
     actions.onGoalChanged?.();
   }));

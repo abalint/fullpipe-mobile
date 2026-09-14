@@ -28,8 +28,11 @@ import type { Definitions, TranscriptDoc } from "./types";
     7: one-token headwords (万が一) are no longer served as phrases.
     8: /definitions serves lexical compounds only — particle-led grammar
        patterns (に関して, という), word+glue (本当に) and homophones (し+ない
-       as 市内) are gone; a cached sidecar would keep showing them. */
-export const SIDECAR_FORMAT = 8;
+       as 市内) are gone; a cached sidecar would keep showing them.
+    9: manga volumes are rebuilt by the AI read (tools.manga read-apply):
+       new sentence track, new bubble line counts, bubble glosses — a
+       cached volume must re-pull manga.json + transcript. */
+export const SIDECAR_FORMAT = 9;
 
 export interface VideoRecord {
   path: string;

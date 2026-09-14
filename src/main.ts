@@ -1,11 +1,12 @@
-// App shell: hash router + bottom nav. Tabs: queue / listen / pages /
-// progress / settings; player and page routes carry an episode id.
+// App shell: hash router + bottom nav. Tabs: queue / listen / read (pages +
+// manga) / progress / settings; player, page and manga routes carry an episode id.
 
 import "./style.css";
 import { queueView } from "./views/queue";
 import { passiveView } from "./views/passive";
 import { pagesView } from "./views/pages";
 import { readerView } from "./views/reader";
+import { mangaReaderView } from "./views/manga-reader";
 import { playerView } from "./views/player";
 import { settingsView } from "./views/settings";
 import { statsView } from "./views/stats";
@@ -38,6 +39,7 @@ function route(): void {
   if (view === "player" && arg)
     node = playerView(arg, arg2 !== undefined && arg2 !== "" ? Number(arg2) : undefined);
   else if (view === "page" && arg) node = readerView(arg);
+  else if (view === "manga" && arg) node = mangaReaderView(arg);
   else if (view === "pages") node = pagesView();
   else if (view === "listen") node = passiveView();
   else if (view === "progress") node = statsView();

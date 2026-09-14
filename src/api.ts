@@ -9,6 +9,8 @@ import type {
   Job,
   ListName,
   ListWord,
+  MangaDoc,
+  MangaLibrary,
   PageDoc,
   PaintState,
   PrepDoc,
@@ -178,6 +180,19 @@ export const api = {
   // page-job post structure for the reader (tokens ride in /transcript)
   pageUrl: (id: string) => `${base()}/page/${encodeURIComponent(id)}`,
   getPage: (id: string) => request<PageDoc>(`/page/${encodeURIComponent(id)}`),
+  // manga volume structure (pages + bubbles as sentence-idx runs; tokens ride
+  // in /transcript) and the page scans (media auth — ?t= for downloadFile)
+  mangaUrl: (id: string) => `${base()}/manga/${encodeURIComponent(id)}`,
+  getManga: (id: string) => request<MangaDoc>(`/manga/${encodeURIComponent(id)}`),
+  mangaPageUrl: (id: string, file: string) =>
+    withToken(`${base()}/manga/${encodeURIComponent(id)}/page/${encodeURIComponent(file)}`),
+  // the PC's manga library (series → volumes, with queue state) and the
+  // picker's "queue these volumes" — the server scans the folder over ssh
+  getMangaLibrary: (refresh = false) =>
+    request<MangaLibrary>(`/manga/library${refresh ? "?refresh=true" : ""}`),
+  ingestManga: (remoteDir: string, volumes: number[]) =>
+    request<{ slug: string; title: string; enqueued: string[]; already: string[] }>(
+      "/manga/ingest", { method: "POST", body: JSON.stringify({ remote_dir: remoteDir, volumes }) }),
   // JMdict entries for every content lemma in the episode (any-word popup);
   // {} until the PC has run `tools.jmdict build`
   getDefinitions: (id: string) =>

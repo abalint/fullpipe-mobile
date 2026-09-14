@@ -12,11 +12,13 @@ import {
   applyPaintKnown,
   fetchPaint,
   getCachedPaint,
+  grammarListsFor,
   listClass,
   listsFor,
   lookupListOf,
   NO_LISTS,
   paintsInterest,
+  phraseListsFor,
   sameLists,
 } from "../paint";
 import type { ListSnapshot, PaintLists } from "../paint";
@@ -40,7 +42,7 @@ import {
 } from "../store";
 import { flushOutbox } from "../sync";
 import { cancelTapSync, onTapSync, scheduleTapSync } from "../livesync";
-import type { Definitions, PageDoc, PagePost, TranscriptSentence } from "../types";
+import type { Definitions, PageDoc, PagePost, TranscriptDoc, TranscriptSentence } from "../types";
 
 const CHUNK = 40; // posts rendered per fill — a 1000-post thread must not DOM-bomb
 
@@ -103,7 +105,7 @@ export function readerView(episodeId: string): HTMLElement {
   // ★ interest, green should-know), live state over the bundle's snapshot —
   // standing state, so they paint like the unknown wash
   let lists: PaintLists = NO_LISTS;
-  let snapshot: ListSnapshot = {}; // the bundle's copy of the lists
+  let snapshot: ListSnapshot & Pick<TranscriptDoc, "grammar_points"> = {}; // the bundle's copy of the lists + grammar glosses
   let defs: Definitions = {};
   let rendered = 0; // posts painted so far
 
@@ -111,6 +113,11 @@ export function readerView(episodeId: string): HTMLElement {
     episodeId,
     defs: () => defs,
     interest: () => lists.interest,
+    // the grammar layer's gloss + tier come from the transcript; the
+    // grammar / phrase axes (known · think-you-know · ★) from the live paint
+    grammarPoints: () => snapshot.grammar_points ?? {},
+    grammar: () => grammarListsFor(getCachedPaint(episodeId)),
+    phrases: () => phraseListsFor(getCachedPaint(episodeId)),
     onMarkChanged: () => {
       paintTaps();
       scheduleTapSync(episodeId);

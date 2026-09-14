@@ -16,17 +16,19 @@ so use the hostname, not a raw `100.x` IP.
 
 ```
 src/
-├── main.ts            app shell: hash router + bottom nav (Queue / Listen / Pages / Progress / Settings)
+├── main.ts            app shell: hash router + bottom nav (Queue / Listen / Read / Progress / Settings)
 ├── api.ts             client for the MOBILE.md server API
 ├── store.ts           settings · per-episode taps · outbox · prep-doc + stats cache (localStorage)
 ├── sync.ts            opportunistic outbox flush (start / online / visible)
-├── viewtime.ts        immersion-time recorder (watch vs listen) + week/day grouping
+├── viewtime.ts        immersion-time recorder (watch · listen · read) + week/day grouping
 ├── listfilter.ts      sort + status/genre/on-phone filters shared by the Queue and Listen tabs
 ├── nowplaying.ts      now-playing strip above the nav → back to the episode the audio service is playing
 ├── paint.ts           live highlight state (GET /paint) overlaid on cached sidecars
+├── manga.ts           manga bundles (structure + tokens + dictionary + page scans) · reading-time recorder
+├── manga-layout.ts    reader geometry: fit / zoom bounds / tap zones · bubble tokens → printed lines
 ├── prep-render.ts     token / ruby markup shared by the player overlay, popup and reader
 ├── share.ts           JS side of the share-sheet target
-├── views/             queue · player · passive · pages · reader · stats · confirm · settings
+├── views/             queue · player · passive · pages (the Read tab: manga + 5ch) · reader (5ch) · manga-reader · stats · confirm · settings
 ├── demo-prep.json     fixture (from render/demo-prep.html) — Settings → "Load demo prep doc" (opens in the player)
 └── smoke.test.ts      DOM smoke tests (vitest + happy-dom)
 ```
@@ -228,3 +230,36 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
 - background video pull (WorkManager, unmetered+charging) + retention/pin UI —
   downloads are manual (⬇ buttons) for now
 - deep-link into AnkiDroid
+
+## Manga reader (2026-09-14 — fullPipe/MANGA.md)
+
+The **Read** tab (was Pages) lists manga volumes from the PC library grouped
+per series (`tools.manga` on the PC; 📚 **PC library** queues more, the
+worker OCRs them on the desktop GPU) above the 5ch threads. ⬇ pulls a
+volume's bundle — `manga/<id>/{manga.json, transcript.json, definitions.json,
+pages/*.jpg}`, resumable — and 📖 opens `views/manga-reader.ts`:
+
+- full-screen page scans, right-to-left by default (`⇄` flips it per series);
+  tap the far side to turn forward, the near side to go back, the centre to
+  toggle the chrome; swipe to turn; pinch 1–5×, double-tap 1↔2× about the
+  finger; zoom persists across page turns and a pull past the edge of a
+  zoomed page turns it; spreads fit to width; the slider scrubs; the last
+  page is remembered — the behaviours of the comicReader app, in the webview;
+- the text under the overlay is the PC's AI read (fullPipe/MANGA.md: Opus
+  agents transcribe the pages mokuro boxed and gloss every bubble); a
+  volume downloaded before that read lands re-pulls its structure and
+  transcript on the next open (`SIDECAR_FORMAT` 9), and each glossed
+  bubble's meaning shows at the foot of the popup under a "line" tag;
+- every speech bubble's tokens are laid back into its printed lines as
+  transparent spans (`manga-layout.ts blockLines`, by character count), so
+  the usual washes — orange unknown, blue think-you-know, purple ★, green
+  should-know, ✓/★/✗ marks — sit on the printed words and a tap opens the
+  shared gloss popup with the shared mark cycle (encounter mode `manga`);
+  `◨` hides the washes, `T` shows the OCR text over the bubbles;
+- time on each page is a viewtime sitting (`manga.ts ReadRecorder`) whose
+  played ranges are page spans in the transcript's pseudo-seconds (page × 30),
+  so the server credits exposures for exactly the pages read and the
+  Progress tab counts it as its own kind, `read` — active like watching for
+  exposure credit and the weekly goal, shown apart from ▶ watching and 🎧
+  listening; `✓` marks the volume finished (no cards);
+- swipe-delete on a volume row is phone-local (the PC keeps everything).

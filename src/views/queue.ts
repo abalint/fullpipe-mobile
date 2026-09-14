@@ -67,7 +67,7 @@ export function isPassive(job: Job): boolean {
     the snapshot is stale. */
 export function backlogSeconds(jobs: Job[]): number {
   return jobs
-    .filter((j) => j.kind !== "page" && !isPassive(j) && !pendingWatched(j.episode_id))
+    .filter((j) => j.kind !== "page" && j.kind !== "manga" && !isPassive(j) && !pendingWatched(j.episode_id))
     .filter((j) => STAGED_UNWATCHED.includes(j.state))
     .reduce((sum, j) => sum + (j.duration ?? 0), 0);
 }
@@ -78,7 +78,7 @@ export function backlogSeconds(jobs: Job[]): number {
     artifact, so asking for one 404s and lands in the failure alert. */
 export function pendingVideoDownloads(jobs: Job[]): Job[] {
   return jobs.filter(
-    (j) => j.kind !== "page" && HAS_VIDEO.includes(j.state) && !getVideoRecord(j.episode_id),
+    (j) => j.kind !== "page" && j.kind !== "manga" && HAS_VIDEO.includes(j.state) && !getVideoRecord(j.episode_id),
   );
 }
 
@@ -768,7 +768,7 @@ export function queueView(): HTMLElement {
       list.appendChild(row);
     }
     // passive-shelved episodes live on the Listen tab, page jobs on Pages
-    const mine = jobs.filter((j) => j.kind !== "page" && !isPassive(j));
+    const mine = jobs.filter((j) => j.kind !== "page" && j.kind !== "manga" && !isPassive(j));
     const { sort, filter } = controls.current();
     const shown = sortJobs(filterJobs(mine, filter), sort);
     controls.update(mine, shown.length);
