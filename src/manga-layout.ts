@@ -136,7 +136,12 @@ export function blockLines(block: MangaBlock, sentences: TranscriptSentence[]): 
   for (const si of block.sents) {
     const s = sentences[si];
     if (!s) continue;
-    s.tokens.forEach((t, ti) => seq.push({ text: t.s, si, ti, token: t }));
+    // an empty surface (Sudachi's NFKC leaves … as one token plus two
+    // empty ones) has no glyphs to sit on and would index before the
+    // line's first cell — skip it, keeping ti as the sentence's index
+    s.tokens.forEach((t, ti) => {
+      if (t.s) seq.push({ text: t.s, si, ti, token: t });
+    });
   }
   const total = seq.reduce((n, f) => n + f.text.length, 0);
   const counted = block.lines.reduce((a, b) => a + b, 0);

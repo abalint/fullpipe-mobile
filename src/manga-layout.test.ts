@@ -186,6 +186,21 @@ describe("blockLines", () => {
     expect([walk.si, walk.ti, walk.token.l]).toEqual([0, 2, "走る"]);
     expect([rest.si, rest.ti]).toEqual([0, 2]);
   });
+  it("drops empty-surface tokens (Sudachi's … residue) so no fragment opens a line", () => {
+    // the server tokenizes いいや… as いい|や|…|''|'' — the empties would land
+    // at the head of the next line and index before its first glyph cell
+    const sents: TranscriptSentence[] = [
+      { idx: 0, start: 0, end: 0, tokens: [{ s: "いい", l: "いい" }, { s: "や", l: "や" },
+        { s: "…", l: "." }, { s: "", l: "." }, { s: "", l: "." }] },
+      { idx: 1, start: 0, end: 0, tokens: [{ s: "そんな", l: "そんな" }, { s: "…", l: "." }, { s: "", l: "." }] },
+    ];
+    const block: MangaBlock = { box: [0, 0, 60, 200], vertical: true, font_size: 20,
+      lines: [4, 4], sents: [0, 1] };
+    const lines = blockLines(block, sents);
+    expect(lines.map((l) => l.map((f) => f.text).join(""))).toEqual(["いいや…", "そんな…"]);
+    expect(lines.flat().every((f) => f.text.length > 0)).toBe(true);
+    expect(lines[1][0].ti).toBe(0); // ti stays the sentence's own token index
+  });
   it("falls back to one line when the counts disagree", () => {
     const block: MangaBlock = { box: [0, 0, 60, 200], vertical: true, font_size: 20,
       lines: [4, 4], sents: [0, 1] };
