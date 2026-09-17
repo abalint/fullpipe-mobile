@@ -163,3 +163,29 @@ describe("lookups", () => {
     expect(getTaps("ep1")).toEqual({});
   });
 });
+
+describe("gloss popup grammar layer", () => {
+  it("shows the unit the tap sits in and none of the line's other units", () => {
+    const pop = popup();
+    const line = {
+      ...sentence,
+      grammar: [
+        { pattern: "〜を", start: 1, end: 2 },
+        { pattern: "〜が", start: 2, end: 3 },
+        { pattern: "〜たら", start: 4, end: 5 },
+      ],
+    };
+    pop.show("血", 4, line);
+    const layers = [...pop.el.querySelectorAll(".gp-layer")].map((n) => n.className);
+    expect(layers).toContain("gp-layer gp-grammar");
+    expect(pop.el.querySelector<HTMLElement>(".gp-grammar")!.dataset.grammar).toBe("〜たら");
+    // bare particles elsewhere on the line never ride along under this word
+    expect(pop.el.querySelectorAll(".gp-line-grammar").length).toBe(0);
+    expect(pop.el.textContent).not.toContain("〜が");
+    expect(pop.el.textContent).not.toContain("〜を");
+    // a tap on a token no unit covers gets no grammar layer at all
+    pop.show("の", 3, line);
+    expect(pop.el.querySelector(".gp-grammar")).toBeNull();
+    expect(pop.el.querySelectorAll(".gp-line-grammar").length).toBe(0);
+  });
+});

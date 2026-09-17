@@ -7,8 +7,10 @@
 // tier, the curate pass's note for this line, and its own mark), then
 // the WORD layer — word + reading, the mark cycle (marks land in the shared
 // tap store), inflection breakdown, compound hits, curated gloss/notes,
-// JMdict senses — and the line's other curated grammar/phrase context at the
-// foot. The two marks are independent: every word in 血が騒ぐ can be known
+// JMdict senses — and, at the foot, the line's other curated phrases plus
+// any grammar note the matcher could not place (never the line's other
+// placed units: a word tap shows the grammar it sits in, not every
+// particle on the line). The two marks are independent: every word in 血が騒ぐ can be known
 // while the phrase itself is not, and the card makes that gap visible.
 // Extracted from player.ts so the reader shows the exact same popup for the
 // same tap.
@@ -269,7 +271,6 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
     for (const p of covering) pop.appendChild(phraseLayer(p, defs));
     // --- grammar layer(s): the unit the tapped token sits inside
     const units = ti != null ? grammarAt(sentence?.grammar, ti) : [];
-    const inGrammar = new Set(units.map((g) => g.pattern));
     for (const g of units) pop.appendChild(grammarLayer(g, lineTokens));
 
     // --- word layer
@@ -308,12 +309,16 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
     }
     // dictionary senses
     word.append(...senses(defs, lemma, 2));
-    // the line's other grammar units + the phrases the tap is NOT inside
-    // (GRAMMAR.md) — they belong to the sentence, not one token, so any
-    // word tap surfaces them, each with its own mark
+    // the line's UNPLACED grammar (GRAMMAR.md) — a curate-only note or a
+    // proposed pattern the matcher gave no span, so there is no token to
+    // tap for it; it belongs to the sentence, so any word tap surfaces it
+    // with its own mark. Placed units do NOT ride along: the pattern a
+    // word sits in is its grammar layer above, and the rest of the line's
+    // units (mostly bare particles — 〜が, 〜を, 〜て …) are reached by
+    // tapping them, never listed under an unrelated word.
     const glists = opts.grammar?.() ?? NO_GRAMMAR;
-    for (const g of sentence?.grammar ?? []) {
-      if (inGrammar.has(g.pattern)) continue;
+    const unplaced = (sentence?.grammar ?? []).filter((g) => g.start == null || g.end == null);
+    for (const g of unplaced) {
       const row = el("div", "gp-line-note gp-line-grammar");
       row.appendChild(el("span", "gp-tag", g.proposed ? "grammar?" : "grammar"));
       // in the ledger's think-you-know queue → the same blue as a word there
@@ -326,6 +331,8 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
           grammarPainted(g.pattern, glists)));
       word.appendChild(row);
     }
+    // the phrases the tap is NOT inside — a phrase belongs to the
+    // sentence, not one token, so any word tap surfaces it
     for (const p of sentence?.phrases ?? []) {
       if (inPhrase.has(p.canonical)) continue;
       const row = el("div", "gp-line-note gp-line-phrase");
@@ -347,7 +354,7 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
       word.appendChild(row);
     }
     if (!info && !entries.length && !infl && !covering.length &&
-        !sentence?.grammar?.length && !sentence?.phrases?.length && !sentence?.gloss)
+        !units.length && !unplaced.length && !sentence?.phrases?.length && !sentence?.gloss)
       word.appendChild(el("div", "gp-none", "no dictionary entry"));
     pop.appendChild(word);
     pop.style.display = "";

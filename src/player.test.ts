@@ -464,7 +464,11 @@ describe("playerView subtitle overlay", () => {
     root.remove();
   });
 
-  it("popup shows the line's curated grammar/phrase context on any word tap", async () => {
+  it("popup shows the line's unplaced grammar notes and phrases on any word tap", async () => {
+    // only grammar the matcher gave NO span rides along under a word — a
+    // curate note or a proposal has no token to tap, so the foot is its only
+    // home; placed units (particles etc.) are reached by tapping them
+    // (gloss-popup.test.ts "grammar layer")
     const { root, video } = await mount();
     video.dispatchEvent(new Event("timeupdate")); // first cue — the annotated line
     root.querySelector<HTMLElement>(".subs-overlay .w[data-lemma]")!.click();
