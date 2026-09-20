@@ -14,6 +14,7 @@ import {
   deleteCachedPrep,
   getCachedJobs,
   getCachedPrep,
+  getViewLog,
   hasPendingActions,
   pendingEnqueues,
   pendingPassive,
@@ -25,16 +26,18 @@ import {
 } from "../store";
 import { flushOutbox } from "../sync";
 import { isPageSource } from "../pages";
-import { epLabel, groupSeries, isDone, isSeries, nextToWatch } from "../series";
+import { epLabel, finishedEpisodes, groupSeries, isDone, isSeries, nextToWatch } from "../series";
 import type { SeriesGroup } from "../series";
 import { filterJobs, listControls, sortJobs } from "../listfilter";
+import { deleteVideo, getPosition, getVideoRecord, refreshSidecars } from "../video";
 import {
-  deleteVideo,
-  downloadVideo,
-  getPosition,
-  getVideoRecord,
-  refreshSidecars,
-} from "../video";
+  activeDownloads,
+  bindDownloadButton,
+  downloadError,
+  downloadStatus,
+  startDownload,
+  watchDownloads,
+} from "../downloads";
 import type { FollowState, Job, JobState } from "../types";
 import { FOLLOW_OPTIONS, SURVEY_AXES } from "../types";
 
@@ -63,12 +66,13 @@ export function isPassive(job: Job): boolean {
 
 /** Unwatched seconds sitting on this tab. Counts exactly the rows the queue
     lists: passive-shelved episodes belong to the Listen tab, page jobs to the
-    Pages tab, and an episode marked watched in the outbox is done even though
-    the snapshot is stale. */
-export function backlogSeconds(jobs: Job[]): number {
+    Pages tab, and an episode marked watched in the outbox — or already played to
+    the end on this phone (`finished`, series.finishedEpisodes) — is done even
+    though the snapshot is stale. */
+export function backlogSeconds(jobs: Job[], finished?: ReadonlySet<string>): number {
   return jobs
     .filter((j) => j.kind !== "page" && j.kind !== "manga" && !isPassive(j) && !pendingWatched(j.episode_id))
-    .filter((j) => STAGED_UNWATCHED.includes(j.state))
+    .filter((j) => STAGED_UNWATCHED.includes(j.state) && !finished?.has(j.episode_id))
     .reduce((sum, j) => sum + (j.duration ?? 0), 0);
 }
 
@@ -387,14 +391,21 @@ export function jobRow(
   rerender: () => void,
   onRatingTouch?: () => void,
   offline = false,
+  finished?: ReadonlySet<string>,
 ): HTMLElement {
   const row = el("div", "job");
   const main = el("div", "job-main");
   main.appendChild(el("div", "job-title", job.title || job.source || job.episode_id));
   const sub = el("div", "job-sub");
-  // a queued-offline mark-watched overlays the (stale) snapshot state — the
-  // row reads as done, with the pending chip saying the server doesn't know yet
-  const state = pendingWatched(job.episode_id) && job.state !== "watched" ? "watched" : job.state;
+  // a queued-offline mark-watched — or (2026-09-20) a sitting this phone has
+  // already played past the finished bar (series.finishedEpisodes), which the
+  // server won't have acted on until the next /jobs — overlays the (stale)
+  // snapshot state: the row reads as done, with the pending chip saying the
+  // server doesn't know yet
+  const state =
+    (pendingWatched(job.episode_id) || finished?.has(job.episode_id)) && job.state !== "watched"
+      ? "watched"
+      : job.state;
   if (isSeries(job)) sub.appendChild(el("span", "chip ep", epLabel(job)));
   const chip = el("span", `chip st-${state}`, state);
   sub.appendChild(chip);
@@ -409,6 +420,9 @@ export function jobRow(
   // live narration from the worker / card push ("pushing card 3/12")
   if ((STAGE1.includes(job.state) || job.state === "pushing") && job.progress_msg)
     sub.appendChild(el("span", "muted", ` · ${job.progress_msg}`));
+  const dlErr = downloadError(job.episode_id);
+  if (dlErr && !getVideoRecord(job.episode_id))
+    sub.appendChild(el("span", "muted warn", ` · ⚠ download failed: ${dlErr}`));
   // errors can ride on any state now (e.g. watched + "cards failed" → retry)
   if (job.error) sub.appendChild(el("span", "err", ` ${job.error.slice(0, 120)}`));
   main.appendChild(sub);
@@ -517,41 +531,14 @@ export function jobRow(
       if (!offline) {
         const again = el("button", "small", "↻") as HTMLButtonElement;
         again.title = "re-download video";
-        again.addEventListener("click", async () => {
-          again.disabled = true;
-          try {
-            await downloadVideo(ep, (frac, bytes) => {
-              again.textContent = frac != null
-                ? `↻ ${Math.round(frac * 100)}%`
-                : `↻ ${Math.round(bytes / 1e6)} MB`;
-            });
-            rerender();
-          } catch (e) {
-            again.textContent = "↻";
-            again.disabled = false;
-            alert(`re-download failed: ${(e as Error).message}`);
-          }
-        });
-        actions.appendChild(again);
+        actions.appendChild(bindDownloadButton(again, { ep, title: job.title, idle: "↻" }));
       }
-    } else if (!offline) {
-      const dl = el("button", "small", "⬇ video") as HTMLButtonElement;
-      dl.addEventListener("click", async () => {
-        dl.disabled = true;
-        try {
-          await downloadVideo(ep, (frac, bytes) => {
-            dl.textContent = frac != null
-              ? `⬇ ${Math.round(frac * 100)}%`
-              : `⬇ ${Math.round(bytes / 1e6)} MB`;
-          });
-          rerender();
-        } catch (e) {
-          dl.textContent = "⬇ video";
-          dl.disabled = false;
-          alert(`download failed: ${(e as Error).message}`);
-        }
-      });
-      actions.appendChild(dl);
+    } else if (!offline || downloadStatus(ep)) {
+      // the button paints its own episode's live status (downloads.ts), so a
+      // list rebuild mid-download — or a second download beside it — keeps
+      // the right number on the right row
+      const dl = el("button", "small") as HTMLButtonElement;
+      actions.appendChild(bindDownloadButton(dl, { ep, title: job.title, idle: "⬇ video", prefix: "⬇" }));
     }
   }
   row.appendChild(actions);
@@ -630,6 +617,65 @@ export async function removeJob(job: Job, reload: () => void, offline = false): 
 
 const collapsedKey = (slug: string) => `fp.series.collapsed.${slug}`;
 
+/** A collapsible shell: caret + title + trailing note over `body`, the open /
+    closed state remembered under `key`. Shared by the per-series blocks and
+    the section that gathers them. */
+function collapsible(
+  key: string,
+  cls: string,
+  title: string,
+  note: string,
+  defaultCollapsed = false,
+): { block: HTMLElement; head: HTMLElement; body: HTMLElement } {
+  const block = el("div", cls);
+  const stored = localStorage.getItem(key);
+  if (stored === "1" || (stored === null && defaultCollapsed)) block.classList.add("collapsed");
+  const head = el("div", "series-head");
+  const caret = el("span", "muted", block.classList.contains("collapsed") ? "▸" : "▾");
+  head.append(caret, el("span", "series-title", title));
+  if (note) head.appendChild(el("span", "muted", note));
+  head.addEventListener("click", () => {
+    const collapsed = block.classList.toggle("collapsed");
+    caret.textContent = collapsed ? "▸" : "▾";
+    localStorage.setItem(key, collapsed ? "1" : "0");
+  });
+  const body = el("div", "series-body");
+  block.append(head, body);
+  return { block, head, body };
+}
+
+/** Every series on the queue under one collapsible "Series" header, split
+    into two collapsible shelves: series with at least one episode downloaded
+    ("On phone") and series with nothing downloaded yet ("Not on phone"). Each
+    series stays its own collapsible block inside its shelf. Returns null when
+    there are no series to show. */
+export function seriesSection(
+  groups: SeriesGroup[],
+  rerender: () => void,
+  onRatingTouch?: () => void,
+  offline = false,
+  finished?: ReadonlySet<string>,
+): HTMLElement | null {
+  if (!groups.length) return null;
+  const onPhone = groups.filter((g) => g.episodes.some((j) => getVideoRecord(j.episode_id)));
+  const elsewhere = groups.filter((g) => !g.episodes.some((j) => getVideoRecord(j.episode_id)));
+  const section = collapsible(
+    "fp.series.section.collapsed",
+    "series-section",
+    "Series",
+    `${groups.length} · ${onPhone.length} on phone`,
+  );
+  const shelf = (key: string, title: string, list: SeriesGroup[], defaultCollapsed: boolean) => {
+    if (!list.length) return;
+    const sub = collapsible(key, "series-shelf", title, `${list.length}`, defaultCollapsed);
+    for (const g of list) sub.body.appendChild(seriesBlock(g, rerender, onRatingTouch, offline, finished));
+    section.body.appendChild(sub.block);
+  };
+  shelf("fp.series.shelf.onphone.collapsed", "On phone", onPhone, false);
+  shelf("fp.series.shelf.elsewhere.collapsed", "Not on phone", elsewhere, true);
+  return section.block;
+}
+
 /** One series on the queue: a header (title · progress · resume/download the
     next episode · collapse toggle) over its episodes in playlist order. */
 export function seriesBlock(
@@ -637,62 +683,39 @@ export function seriesBlock(
   rerender: () => void,
   onRatingTouch?: () => void,
   offline = false,
+  finished?: ReadonlySet<string>,
 ): HTMLElement {
-  const block = el("div", "series");
-  if (localStorage.getItem(collapsedKey(g.slug)) === "1") block.classList.add("collapsed");
-  const head = el("div", "series-head");
-  const caret = el("span", "muted", block.classList.contains("collapsed") ? "▸" : "▾");
-  head.append(caret, el("span", "series-title", g.title));
-  const done = g.episodes.filter(isDone).length;
+  const done = g.episodes.filter((j) => isDone(j, finished)).length;
   const onPhone = g.episodes.filter((j) => getVideoRecord(j.episode_id)).length;
-  head.appendChild(
-    el("span", "muted", `${done}/${g.episodes.length} watched · ${onPhone} on phone`),
+  const { block, head, body } = collapsible(
+    collapsedKey(g.slug),
+    "series",
+    g.title,
+    `${done}/${g.episodes.length} watched · ${onPhone} on phone`,
   );
-  head.addEventListener("click", () => {
-    const collapsed = block.classList.toggle("collapsed");
-    caret.textContent = collapsed ? "▸" : "▾";
-    localStorage.setItem(collapsedKey(g.slug), collapsed ? "1" : "0");
-  });
   // resume action: play the next unwatched episode if it's on the phone, else
   // fetch it; a finished set offers a rewatch from the top
-  const next = nextToWatch(g) ?? (onPhone ? g.episodes[0] : null);
+  const next = nextToWatch(g, finished) ?? (onPhone ? g.episodes[0] : null);
   if (next) {
-    const label = nextToWatch(g) ? epLabel(next) : `↺ ${epLabel(next)}`;
+    const label = nextToWatch(g, finished) ? epLabel(next) : `↺ ${epLabel(next)}`;
     if (getVideoRecord(next.episode_id)) {
       const play = el("a", "small btn", `▶ ${label}`) as HTMLAnchorElement;
       play.href = `#/player/${encodeURIComponent(next.episode_id)}`;
       play.addEventListener("click", (e) => e.stopPropagation());
       head.appendChild(play);
-    } else if (!offline && canDownload(next)) {
-      const dl = el("button", "small", `⬇ ${label}`) as HTMLButtonElement;
-      dl.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        dl.disabled = true;
-        try {
-          await downloadVideo(next.episode_id, (frac, bytes) => {
-            dl.textContent = frac != null
-              ? `⬇ ${Math.round(frac * 100)}%`
-              : `⬇ ${Math.round(bytes / 1e6)} MB`;
-          });
-          rerender();
-        } catch (err) {
-          dl.textContent = `⬇ ${label}`;
-          dl.disabled = false;
-          alert(`download failed: ${(err as Error).message}`);
-        }
-      });
-      head.appendChild(dl);
+    } else if ((!offline || downloadStatus(next.episode_id)) && canDownload(next)) {
+      const dl = el("button", "small") as HTMLButtonElement;
+      head.appendChild(
+        bindDownloadButton(dl, { ep: next.episode_id, title: next.title, idle: `⬇ ${label}` }),
+      );
     }
   }
-  block.appendChild(head);
-  const body = el("div", "series-body");
   for (const j of g.episodes)
     body.appendChild(
-      swipeable(jobRow(j, rerender, onRatingTouch, offline), () =>
+      swipeable(jobRow(j, rerender, onRatingTouch, offline, finished), () =>
         void removeJob(j, rerender, offline),
       ),
     );
-  block.appendChild(body);
   return block;
 }
 
@@ -751,7 +774,9 @@ export function queueView(): HTMLElement {
   function render(): void {
     if (!offline) status.textContent = jobs.some((j) => !isPassive(j)) ? "" : "queue is empty";
     list.textContent = "";
-    const total = backlogSeconds(jobs);
+    // one pass over the local view log per render, not per row
+    const finished = finishedEpisodes(jobs, getViewLog());
+    const total = backlogSeconds(jobs, finished);
     backlog.textContent = total > 0 ? hms(total) : "";
     const rerender = () => void load();
     const onRatingTouch = () => (lastRatingTouch = Date.now());
@@ -770,15 +795,15 @@ export function queueView(): HTMLElement {
     // passive-shelved episodes live on the Listen tab, page jobs on Pages
     const mine = jobs.filter((j) => j.kind !== "page" && j.kind !== "manga" && !isPassive(j));
     const { sort, filter } = controls.current();
-    const shown = sortJobs(filterJobs(mine, filter), sort);
+    const shown = sortJobs(filterJobs(mine, filter, undefined, undefined, finished), sort);
     controls.update(mine, shown.length);
     if (!offline && mine.length && !shown.length) status.textContent = "nothing matches the filters";
     const grouped = groupSeries(shown);
-    for (const g of grouped.series)
-      list.appendChild(seriesBlock(g, rerender, onRatingTouch, offline));
+    const section = seriesSection(grouped.series, rerender, onRatingTouch, offline, finished);
+    if (section) list.appendChild(section);
     for (const j of grouped.standalone)
       list.appendChild(
-        swipeable(jobRow(j, rerender, onRatingTouch, offline), () =>
+        swipeable(jobRow(j, rerender, onRatingTouch, offline, finished), () =>
           void removeJob(j, rerender, offline),
         ),
       );
@@ -878,32 +903,31 @@ export function queueView(): HTMLElement {
   const refresh = el("button", "small refresh", "↻ refresh") as HTMLButtonElement;
   refresh.addEventListener("click", () => void load());
   const dlAll = el("button", "small", "⬇ all videos") as HTMLButtonElement;
-  dlAll.addEventListener("click", async () => {
+  const paintDlAll = () => {
+    const n = activeDownloads().length;
+    dlAll.disabled = n > 0;
+    if (n > 0) dlAll.textContent = `⬇ ${n} downloading`;
+    else if (dlAll.textContent !== "nothing to download") dlAll.textContent = "⬇ all videos";
+  };
+  dlAll.addEventListener("click", () => {
     const pending = pendingVideoDownloads(jobs);
     if (!pending.length) {
       dlAll.textContent = "nothing to download";
       setTimeout(() => (dlAll.textContent = "⬇ all videos"), 1500);
       return;
     }
-    dlAll.disabled = true;
-    const failed: string[] = [];
-    for (let i = 0; i < pending.length; i++) {
-      const label = `⬇ ${i + 1}/${pending.length}`;
-      dlAll.textContent = label;
-      try {
-        await downloadVideo(pending[i].episode_id, (frac, bytes) => {
-          dlAll.textContent = frac != null
-            ? `${label} · ${Math.round(frac * 100)}%`
-            : `${label} · ${Math.round(bytes / 1e6)} MB`;
-        });
-      } catch (e) {
-        failed.push(`${pending[i].title || pending[i].episode_id}: ${(e as Error).message}`);
-      }
-    }
-    dlAll.disabled = false;
-    dlAll.textContent = "⬇ all videos";
-    if (failed.length) alert(`some downloads failed:\n${failed.join("\n")}`);
-    void load();
+    // hand the whole set to the background queue — it drains one at a time
+    // and keeps going when you leave the tab or the app
+    for (const j of pending) void startDownload(j.episode_id, j.title);
+    render();
+    paintDlAll();
+  });
+  paintDlAll();
+  // live download state → repaint the buttons in place; a settled download
+  // (done or failed) rebuilds the list so ▶ play / the failure note appear
+  watchDownloads(root, (c) => {
+    paintDlAll();
+    if (!c.status) render();
   });
   toolbar.append(refresh, dlAll, controls.sort, backlog);
   root.insertBefore(toolbar, status);

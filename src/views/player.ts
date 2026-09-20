@@ -75,6 +75,7 @@ import {
 } from "../store";
 import { onTapSync, scheduleTapSync, syncTapsNow } from "../livesync";
 import { ratingBlock, removeJob } from "./queue";
+import { flushSoon } from "../sync";
 import { ViewRecorder } from "../viewtime";
 import {
   clearPosition,
@@ -86,6 +87,7 @@ import {
   sidecarsOutdated,
   savePosition,
 } from "../video";
+import { downloadStatus } from "../downloads";
 import type {
   FollowState,
   GrammarPoint,
@@ -454,6 +456,11 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   const recorder = new ViewRecorder({
     episodeId, title: title || episodeId, kind: "watch",
     state: () => getSubMode(), // the 🎧 handoff closes this recorder; the service's time is `audio`
+    // the sitting was handed over mid-play (past the finished bar, or the
+    // video ended): push it to the server now, so the queue row flips to
+    // watched here instead of with the first tap in the next episode
+    // (2026-09-20). Fire-and-forget — playback never waits on the network.
+    onSplit: () => flushSoon(),
   });
 
   const stage = el("div", "player-stage");
@@ -959,7 +966,9 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   void (async () => {
     const rec = getVideoRecord(episodeId);
     if (!rec) {
-      status.textContent = "⚠ not downloaded — ⬇ video on the queue screen first";
+      status.textContent = downloadStatus(episodeId)
+        ? "⬇ still downloading — it plays once the download finishes"
+        : "⚠ not downloaded — ⬇ video on the queue screen first";
       return;
     }
     try {
@@ -990,6 +999,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     upnext.hidden = true;
   };
   video.addEventListener("ended", () => {
+    recorder.split(); // the sitting reaches the server before the up-next card
     const jobs = getCachedJobs()?.jobs ?? [];
     const next = nextEpisode(jobs, episodeId);
     upnext.textContent = "";
@@ -1287,6 +1297,7 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
     hideUpnext();
     savePos();
     recorder.close();
+    flushSoon(); // don't sit on the sitting until the next tap/rating
     video.pause();
     video.removeAttribute("src");
     video.load();

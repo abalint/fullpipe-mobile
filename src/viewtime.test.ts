@@ -193,6 +193,55 @@ describe("ViewRecorder", () => {
     ]);
   });
 
+  it("hands the sitting over at the finished bar and keeps counting (2026-09-20)", () => {
+    // 20 s episode → the server's 80 % bar falls at 16 s played
+    const splits: number[] = [];
+    const r = new ViewRecorder({ ...opts, onSplit: () => splits.push(getViewLog().length) });
+    play(r, 0, 18, 1, 20);
+    expect(splits).toEqual([1]); // recorded the moment it crossed, not on leave
+    const handed = getViewLog()[0];
+    expect(handed.secs).toBe(16);
+    expect(handed.played).toEqual([[0, 16]]);
+    expect(getOutbox().map((a) => a.kind)).toEqual(["viewtime"]); // ready to flush
+    // the anchor survived: the sitting carried straight on from 16 s
+    expect(r.current!.secs).toBeCloseTo(2, 5);
+    expect(r.current!.played).toEqual([[16, 18]]);
+    r.close();
+    const log = getViewLog();
+    expect(log.length).toBe(2);
+    expect(log[1].played).toEqual([[16, 18]]);
+    // nothing lost in the handover — the two segments are the whole 18 s
+    expect(log[0].secs + log[1].secs).toBeCloseTo(18, 5);
+  });
+
+  it("crosses the finished bar once per sitting, however long the rewatch", () => {
+    let splits = 0;
+    const r = new ViewRecorder({ ...opts, onSplit: () => splits++ });
+    play(r, 0, 20, 1, 20);
+    expect(splits).toBe(1);
+    r.reanchor();
+    play(r, 0, 20, 1, 20); // watched the whole thing again
+    expect(splits).toBe(1);
+    expect(getViewLog().length).toBe(1);
+    r.close();
+    expect(getViewLog().length).toBe(2);
+  });
+
+  it("split() on the `ended` event records the sitting; an empty split is a no-op", () => {
+    let splits = 0;
+    const r = new ViewRecorder({ ...opts, onSplit: () => splits++ });
+    play(r, 0, 10); // 30-minute episode — nowhere near the finished bar
+    expect(getViewLog()).toEqual([]);
+    expect(r.split()).toBe(true);
+    expect(splits).toBe(1);
+    expect(getViewLog()[0].secs).toBe(10);
+    expect(getOpenViewSegment()).toBeNull();
+    expect(r.split()).toBe(false); // nothing open now
+    expect(splits).toBe(1);
+    r.close();
+    expect(getViewLog().length).toBe(1); // close() adds nothing on top
+  });
+
   it("checkpoints the open segment and recovers it after a process death", () => {
     const r = new ViewRecorder(opts);
     play(r, 0, 7); // past the 5 s checkpoint bar

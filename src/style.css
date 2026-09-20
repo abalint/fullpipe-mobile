@@ -57,6 +57,7 @@ h2 { font-size: 1rem; color: var(--muted); margin: 28px 0 10px;
 .stats b { color: var(--fg); }
 .status { color: var(--muted); font-size: .85rem; margin: 8px 0; }
 .muted { color: var(--muted); font-size: .85rem; }
+.muted.warn { color: #c96a2b; }
 .err { color: var(--dunno); font-size: .85rem; }
 
 .synopsis { background: var(--card); border-radius: 10px; padding: 12px 14px; }
@@ -656,6 +657,18 @@ button.more { display: block; margin: 12px auto 24px; }
                              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .series-head .muted { font-size: .8rem; }
 .series.collapsed .series-body { display: none; }
+/* the queue's Series section: one outer collapsible over two shelves (on
+   phone / not on phone), each shelf a collapsible over its series blocks */
+.series-section { margin: 14px 0 6px; background: var(--card); border-radius: 10px;
+                  padding: 4px 10px 6px; }
+.series-section > .series-head .series-title { font-size: 1.05rem; }
+.series-section.collapsed > .series-body { display: none; }
+.series-shelf { margin: 4px 0 2px 4px; }
+.series-shelf > .series-head { padding: 4px 2px; }
+.series-shelf > .series-head .series-title { font-weight: 500; font-size: .95rem; opacity: .85; }
+.series-shelf.collapsed > .series-body { display: none; }
+.series-shelf > .series-body { padding-left: 8px; }
+.series-shelf .series { margin: 6px 0 4px; }
 .chip.ep { margin-right: 6px; background: color-mix(in srgb, var(--accent) 18%, transparent);
            color: var(--accent); font-variant-numeric: tabular-nums; }
 .field.check { flex-direction: row; align-items: center; gap: 10px; }

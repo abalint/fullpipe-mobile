@@ -1,5 +1,6 @@
-// Opportunistic outbox flush. Called on app start, on returning online, and
-// manually from Settings. Actions are replay-safe (batch_id / review_id dedup,
+// Opportunistic outbox flush. Called on app start, on returning online, from
+// a view that just queued something urgent (flushSoon), and manually from
+// Settings. Actions are replay-safe (batch_id / review_id dedup,
 // idempotent watched/enqueue), so double-flush after a flaky connection is
 // harmless.
 
@@ -80,13 +81,23 @@ export async function flushOutbox(): Promise<FlushResult> {
   return { sent, dropped, remaining: getOutbox().length, error };
 }
 
+let afterFlush: (() => void) | undefined;
+
+/** Flush in the background, then let the shell redraw (main.ts rebuilds the
+    queue when you're on it). Never throws, never blocks the caller — views
+    call it when they've just queued something the server should hear about
+    straight away, e.g. the player handing over a finished sitting
+    (2026-09-20). */
+export function flushSoon(): void {
+  if (!getOutbox().length) return;
+  void flushOutbox().then(() => afterFlush?.()).catch(() => {});
+}
+
 export function installAutoFlush(onChange?: () => void): void {
-  const run = () => {
-    if (getOutbox().length) void flushOutbox().then(() => onChange?.());
-  };
-  window.addEventListener("online", run);
+  afterFlush = onChange;
+  window.addEventListener("online", flushSoon);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") run();
+    if (document.visibilityState === "visible") flushSoon();
   });
-  run();
+  flushSoon();
 }

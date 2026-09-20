@@ -8,7 +8,8 @@ import { api } from "../api";
 import { buildPlaylist, PassiveAudio, resolveStartIndex } from "../audio";
 import type { PassiveAudioState } from "../audio";
 import { cacheJobs, getCachedJobs } from "../store";
-import { clearPosition, downloadVideo, getVideoRecord, savePosition } from "../video";
+import { clearPosition, getVideoRecord, savePosition } from "../video";
+import { bindDownloadButton, downloadStatus, watchDownloads } from "../downloads";
 import { fmtClock } from "./player";
 import { fmtDur, isPassive, removeJob, swipeable } from "./queue";
 import { filterJobs, listControls, sortJobs } from "../listfilter";
@@ -192,24 +193,9 @@ export function passiveView(): HTMLElement {
       const watch = el("a", "small btn", "watch") as HTMLAnchorElement;
       watch.href = `#/player/${encodeURIComponent(job.episode_id)}`;
       actions.appendChild(watch);
-    } else if (!offline) {
-      const dl = el("button", "small", "⬇") as HTMLButtonElement;
-      dl.addEventListener("click", async () => {
-        dl.disabled = true;
-        try {
-          await downloadVideo(job.episode_id, (frac, bytes) => {
-            dl.textContent = frac != null
-              ? `⬇ ${Math.round(frac * 100)}%`
-              : `⬇ ${Math.round(bytes / 1e6)} MB`;
-          });
-          render();
-        } catch (e) {
-          dl.textContent = "⬇";
-          dl.disabled = false;
-          alert(`download failed: ${(e as Error).message}`);
-        }
-      });
-      actions.appendChild(dl);
+    } else if (!offline || downloadStatus(job.episode_id)) {
+      const dl = el("button", "small") as HTMLButtonElement;
+      actions.appendChild(bindDownloadButton(dl, { ep: job.episode_id, title: job.title, idle: "⬇" }));
     }
     if (!offline) {
       const unshelve = el("button", "small", "↩ queue") as HTMLButtonElement;
@@ -227,6 +213,12 @@ export function passiveView(): HTMLElement {
     row.appendChild(actions);
     return row;
   }
+
+  // live download state → repaint ⬇ buttons in place; a settled download
+  // rebuilds the list so ▶ listen appears
+  watchDownloads(root, (c) => {
+    if (!c.status) render();
+  });
 
   function render(): void {
     const all = jobs.filter(isPassive);

@@ -18,6 +18,7 @@ import { installShareTarget } from "./share";
 import { isPageSource } from "./pages";
 import { getCachedJobs, getSettings, hydratePrepCache } from "./store";
 import { nowPlayingStrip } from "./nowplaying";
+import { installDownloads } from "./downloads";
 
 const outlet = document.getElementById("outlet")!;
 
@@ -72,6 +73,10 @@ void pullListenLog();
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") void pullListenLog();
 });
+
+// background episode downloads: native events + catch up on anything that
+// finished while the webview was paused or gone
+installDownloads();
 
 // first-run: no server configured → land on settings
 if (!getSettings().serverUrl && !location.hash) location.hash = "#/settings";

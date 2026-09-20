@@ -1,5 +1,6 @@
-// Episode video: download-then-play (MOBILE.md decoupled pulls — manual
-// trigger for now, WorkManager later). Files land in app-internal storage
+// Episode video: download-then-play (MOBILE.md decoupled pulls — the phone's
+// transfers run in the native VideoDownloadService, see downloads.ts; the
+// in-webview path here serves the web build). Files land in app-internal storage
 // (videos/<episode>.mp4 + .srt sidecar) and play in the in-app player.
 // Retained after mark-watched (for rewatch + passive listening) — deletion is
 // manual only: swipe-delete on a queue/Listen row (deleteVideo), never
@@ -102,100 +103,101 @@ async function ensureVideosDir(): Promise<void> {
   }
 }
 
+/** Where an episode's offline bundle lives (relative to Directory.Data). */
+export function videoPaths(ep: string): { vPath: string; sPath: string; tPath: string; dPath: string } {
+  return {
+    vPath: `videos/${ep}.mp4`,
+    sPath: `videos/${ep}.srt`,
+    tPath: `videos/${ep}.transcript.json`,
+    dPath: `videos/${ep}.definitions.json`,
+  };
+}
+
+/** The video (and whichever sidecars landed) are on disk — pull the prep
+    article into the offline bundle and write the VideoRecord that flips the
+    row to ▶ play. Shared by the in-webview download below and the native
+    background download (downloads.ts settle). */
+export async function finalizeVideoRecord(
+  ep: string,
+  sidecars: { subsPath?: string; transcriptPath?: string; defsPath?: string },
+): Promise<VideoRecord> {
+  const { vPath } = videoPaths(ep);
+  // prep article into the same offline bundle (localStorage cache — the prep
+  // view reads it there). At `prepared` this is the uncurated doc; the queue
+  // screen re-caches once curation lands (staged), and the prep view
+  // refreshes it on any online open.
+  try {
+    cachePrep(await api.getPrep(ep));
+  } catch {
+    /* prep is best-effort */
+  }
+  const stat = await Filesystem.stat({ path: vPath, directory: Directory.Data });
+  const { subsPath, transcriptPath, defsPath } = sidecars;
+  const rec: VideoRecord = {
+    path: vPath,
+    subsPath,
+    transcriptPath,
+    defsPath,
+    curated: transcriptPath
+      ? ((await readLocalJson<TranscriptDoc>(transcriptPath))?.curated ?? false)
+      : false,
+    format: SIDECAR_FORMAT,
+    size: stat.size,
+    at: new Date().toISOString(),
+  };
+  localStorage.setItem(key(ep), JSON.stringify(rec));
+  return rec;
+}
+
+/** In-webview download (web build / tests; the phone goes through the native
+    VideoDownloadService via downloads.ts — this path dies with the webview
+    when the app is backgrounded). Callers should not use it directly from a
+    button: downloads.ts owns the shared progress state. */
 export async function downloadVideo(
   ep: string,
   onProgress?: (fraction: number | null, bytes: number) => void,
 ): Promise<VideoRecord> {
   const { token } = getSettings();
   const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-  const vPath = `videos/${ep}.mp4`;
-  const sPath = `videos/${ep}.srt`;
-  const tPath = `videos/${ep}.transcript.json`;
-  const dPath = `videos/${ep}.definitions.json`;
+  const { vPath, sPath, tPath, dPath } = videoPaths(ep);
   // downloadFile doesn't create parent dirs despite recursive:true (ENOENT)
   await ensureVideosDir();
 
+  const videoUrl = api.videoUrl(ep);
+  // the progress event is global to the plugin — every download in flight
+  // fires every listener — so keep only this file's events
   const listener = onProgress
     ? await Filesystem.addListener("progress", (p) => {
+        if (p.url !== videoUrl) return;
         onProgress(p.contentLength ? p.bytes / p.contentLength : null, p.bytes);
       })
     : null;
   try {
     await Filesystem.downloadFile({
-      url: api.videoUrl(ep),
+      url: videoUrl,
       headers,
       path: vPath,
       directory: Directory.Data,
       recursive: true,
       progress: !!onProgress,
     });
-    let subsPath: string | undefined;
-    try {
-      await Filesystem.downloadFile({
-        url: api.subsUrl(ep),
-        headers,
-        path: sPath,
-        directory: Directory.Data,
-        recursive: true,
-      });
-      subsPath = sPath;
-    } catch {
-      /* subs are best-effort */
-    }
-    // tokenized sentence track for the in-app player (best-effort like subs —
-    // without it the player falls back to plain SRT cues)
-    let transcriptPath: string | undefined;
-    try {
-      await Filesystem.downloadFile({
-        url: api.transcriptUrl(ep),
-        headers,
-        path: tPath,
-        directory: Directory.Data,
-        recursive: true,
-      });
-      transcriptPath = tPath;
-    } catch {
-      /* transcript is best-effort */
-    }
-    // per-episode dictionary for the any-word popup (best-effort; {} until
-    // the PC has built jmdict.db)
-    let defsPath: string | undefined;
-    try {
-      await Filesystem.downloadFile({
-        url: api.definitionsUrl(ep),
-        headers,
-        path: dPath,
-        directory: Directory.Data,
-        recursive: true,
-      });
-      defsPath = dPath;
-    } catch {
-      /* definitions are best-effort */
-    }
-    // prep article into the same offline bundle (localStorage cache — the prep
-    // view reads it there). At `prepared` this is the uncurated doc; the queue
-    // screen re-caches once curation lands (staged), and the prep view
-    // refreshes it on any online open.
-    try {
-      cachePrep(await api.getPrep(ep));
-    } catch {
-      /* prep is best-effort */
-    }
-    const stat = await Filesystem.stat({ path: vPath, directory: Directory.Data });
-    const rec: VideoRecord = {
-      path: vPath,
-      subsPath,
-      transcriptPath,
-      defsPath,
-      curated: transcriptPath
-        ? ((await readLocalJson<TranscriptDoc>(transcriptPath))?.curated ?? false)
-        : false,
-      format: SIDECAR_FORMAT,
-      size: stat.size,
-      at: new Date().toISOString(),
+    const sidecar = async (url: string, path: string): Promise<string | undefined> => {
+      try {
+        await Filesystem.downloadFile({ url, headers, path, directory: Directory.Data, recursive: true });
+        return path;
+      } catch {
+        return undefined; // subs / transcript / definitions are all best-effort
+      }
     };
-    localStorage.setItem(key(ep), JSON.stringify(rec));
-    return rec;
+    return await finalizeVideoRecord(ep, {
+      subsPath: await sidecar(api.subsUrl(ep), sPath),
+      // tokenized sentence track for the in-app player (without it the
+      // player falls back to plain SRT cues)
+      transcriptPath: await sidecar(api.transcriptUrl(ep), tPath),
+      // per-episode dictionary for the any-word popup ({} until the PC has
+      // built jmdict.db)
+      defsPath: await sidecar(api.definitionsUrl(ep), dPath),
+    });
   } finally {
     void listener?.remove();
   }
@@ -270,7 +272,9 @@ export function sidecarsOutdated(ep: string): boolean {
 export async function deleteVideo(ep: string): Promise<void> {
   const rec = getVideoRecord(ep);
   if (rec) {
-    for (const p of [rec.path, rec.subsPath, rec.transcriptPath, rec.defsPath]) {
+    // `.part` is the native downloader's in-progress file — clear it too so a
+    // deleted episode doesn't resume from stale bytes on a re-download
+    for (const p of [rec.path, `${rec.path}.part`, rec.subsPath, rec.transcriptPath, rec.defsPath]) {
       if (!p) continue;
       try {
         await Filesystem.deleteFile({ path: p, directory: Directory.Data });

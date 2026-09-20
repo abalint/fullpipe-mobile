@@ -44,6 +44,15 @@ describe("filterJobs", () => {
     expect(ids(filterJobs(jobs, { status: "working", genre: "", onPhone: false }, onPhone)))
       .toEqual(["work", "dead"]);
   });
+  it("counts an episode the phone itself finished as watched (2026-09-20)", () => {
+    // "ready" was just played through; the server row still says staged
+    const finished = new Set(["ready"]);
+    const f = (status: "towatch" | "watched" | "working") =>
+      ids(filterJobs(jobs, { status, genre: "", onPhone: false }, onPhone, undefined, finished));
+    expect(f("towatch")).toEqual(["half"]);
+    expect(f("watched")).toEqual(["ready", "done", "pushing"]);
+    expect(f("working")).toEqual(["work", "dead"]);
+  });
   it('"in progress" is a saved playback position, not a pipeline state', () => {
     // a position of 0 (never really started) or none at all is not in progress
     expect(ids(filterJobs(jobs, { status: "partway", genre: "", onPhone: false }, onPhone, positionOf)))

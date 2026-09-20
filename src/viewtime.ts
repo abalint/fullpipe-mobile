@@ -55,6 +55,12 @@ const MAX_TICK_SECS = 2;
 /** Checkpoint the open segment this often (accrued seconds) — the cost of a
     process kill mid-playback. */
 const CHECKPOINT_SECS = 5;
+/** The server's PLAY_ACTIVATION_FRACTION (ledger/ledgerctl.py): once the
+    sitting's played seconds pass this much of the episode's length the row
+    counts as finished. Mirrored here so the recorder can hand the sitting
+    over the moment it crosses — plays are summed server-side, so splitting
+    the sitting in two costs nothing (2026-09-20). */
+const FINISHED_FRACTION = 0.8;
 
 export interface RecorderOpts {
   episodeId: string;
@@ -64,6 +70,11 @@ export interface RecorderOpts {
       it (segment.modes), so a sitting says how much was watched with subs
       on, keyword-only, or off. */
   state?: () => SubState;
+  /** A segment was handed off mid-sitting (split() — the finished threshold
+      or the end of the video). The player flushes the outbox from here so
+      the server hears about this episode before the next one starts
+      (2026-09-20). */
+  onSplit?: () => void;
   now?: () => Date; // injectable clock (tests: midnight rollover)
 }
 
@@ -77,6 +88,10 @@ export class ViewRecorder {
   private seg: ViewSegment | null = null;
   private lastPos: number | null = null;
   private sinceCheckpoint = 0;
+  /** Seconds played since this recorder opened — across splits, so the
+      finished threshold sees the whole sitting. */
+  private playedSecs = 0;
+  private handedOffFinished = false;
 
   constructor(private readonly opts: RecorderOpts) {}
 
@@ -120,8 +135,17 @@ export class ViewRecorder {
     }
     if (pos > this.seg.reached) this.seg.reached = pos;
     if (duration != null && Number.isFinite(duration) && duration > 0) this.seg.duration = duration;
+    this.playedSecs += secs;
     this.sinceCheckpoint += delta;
     if (this.sinceCheckpoint >= CHECKPOINT_SECS) this.checkpoint();
+    // crossing the finished bar: hand the sitting over now so the queue row
+    // flips while you're still here, not on the first tap in the next
+    // episode. Once per player-open — a long rewatch doesn't re-split.
+    const dur = this.seg?.duration;
+    if (!this.handedOffFinished && dur && this.playedSecs / dur >= FINISHED_FRACTION) {
+      this.handedOffFinished = true;
+      this.split();
+    }
   }
 
   /** A seek is underway: the next tick re-anchors instead of counting the jump. */
@@ -137,18 +161,36 @@ export class ViewRecorder {
 
   /** End the sitting. Anything under a second of playback is noise. */
   close(): void {
+    this.lastPos = null;
+    this.record();
+  }
+
+  /** Hand the open segment to the log/outbox now and keep counting — unlike
+      close() the playback anchor survives, so the next tick continues the
+      sitting in a fresh segment instead of losing a beat. Segments are
+      additive server-side (exposure is per played range, the finished marker
+      is the summed seconds), so one sitting arriving as two is harmless —
+      close() already splits at midnight. True when something was recorded
+      (2026-09-20). */
+  split(): boolean {
+    const recorded = this.record();
+    if (recorded) this.opts.onSplit?.();
+    return recorded;
+  }
+
+  /** Write the open segment out (≥1 s of playback, rounded, ranges merged)
+      and clear the slot. Shared by close() and split(). */
+  private record(): boolean {
     const seg = this.seg;
     this.seg = null;
-    this.lastPos = null;
     this.sinceCheckpoint = 0;
     setOpenViewSegment(null);
-    if (seg && seg.secs >= 1) {
-      const modes = seg.modes &&
-        Object.fromEntries(Object.entries(seg.modes).map(([k, v]) => [k, round1(v as number)]));
-      const played = mergeRanges(seg.played ?? []);
-      recordViewSegment({ ...seg, secs: round1(seg.secs), reached: round1(seg.reached),
-        ...(modes ? { modes } : {}), ...(played.length ? { played } : {}) });
-    }
+    if (!seg || seg.secs < 1) return false;
+    const modes = seg.modes &&
+      Object.fromEntries(Object.entries(seg.modes).map(([k, v]) => [k, round1(v as number)]));
+    const played = mergeRanges(seg.played ?? []);
+    return recordViewSegment({ ...seg, secs: round1(seg.secs), reached: round1(seg.reached),
+      ...(modes ? { modes } : {}), ...(played.length ? { played } : {}) });
   }
 
   /** The in-progress segment (tests / diagnostics). */

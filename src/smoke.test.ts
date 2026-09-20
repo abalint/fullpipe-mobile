@@ -36,7 +36,7 @@ import {
 } from "./store";
 import { flushOutbox } from "./sync";
 import { api, ApiError } from "./api";
-import { backlogSeconds, hms, jobRow, pendingVideoDownloads, seriesBlock, sortJobs, starBar }
+import { backlogSeconds, hms, jobRow, pendingVideoDownloads, seriesBlock, seriesSection, sortJobs, starBar }
   from "./views/queue";
 import { groupSeries } from "./series";
 import { statsView } from "./views/stats";
@@ -691,11 +691,70 @@ describe("seriesBlock (series.ts grouping on the queue)", () => {
     const block = seriesBlock(g, () => {}, undefined, false);
     expect(block.querySelector(".series-head button")!.textContent).toBe("⬇ EP01");
   });
+  it("honours the phone's own finished evidence a /jobs fetch ahead of the server", () => {
+    // EP02 was just played to the end; the server row still says "staged"
+    const g = groupSeries([ep(1, "watched"), ep(2), ep(3)]).series[0];
+    const block = seriesBlock(g, () => {}, undefined, false, new Set(["ser_hotspot_e02"]));
+    const head = block.querySelector(".series-head")!;
+    expect(head.textContent).toContain("2/3 watched");
+    expect(head.querySelector("button")!.textContent).toBe("\u2b07 EP03");
+    const chips = [...block.querySelectorAll(".series-body .chip[class*=\"st-\"]")]
+      .map((c) => c.textContent);
+    expect(chips).toEqual(["watched", "watched", "staged"]);
+  });
   it("collapses and remembers it", () => {
     const g = groupSeries([ep(1)]).series[0];
     const block = seriesBlock(g, () => {});
     (block.querySelector(".series-head") as HTMLElement).click();
     expect(block.classList.contains("collapsed")).toBe(true);
     expect(localStorage.getItem("fp.series.collapsed.hotspot")).toBe("1");
+  });
+});
+
+describe("seriesSection (the queue's collapsible Series shelf)", () => {
+  const ep = (slug: string, n: number): Job =>
+    ({
+      episode_id: `ser_${slug}_e0${n}`, source: `series://${slug}/${n}`, state: "staged",
+      title: `${slug} EP0${n}`, series: slug, series_title: slug.toUpperCase(), ep_no: n,
+    }) as Job;
+  beforeEach(() => localStorage.clear());
+
+  it("returns null with no series", () => {
+    expect(seriesSection([], () => {})).toBeNull();
+  });
+
+  it("splits series into on-phone / not-on-phone shelves, each series still its own block", () => {
+    localStorage.setItem("fp.video.ser_alpha_e01", JSON.stringify({ path: "x", bytes: 1 }));
+    const groups = groupSeries([ep("alpha", 1), ep("alpha", 2), ep("beta", 1)]).series;
+    const section = seriesSection(groups, () => {})!;
+    expect(section.classList.contains("series-section")).toBe(true);
+    expect(section.querySelector(":scope > .series-head .series-title")!.textContent).toBe("Series");
+    expect(section.querySelector(":scope > .series-head .muted:last-child")!.textContent)
+      .toBe("2 · 1 on phone");
+    const shelves = [...section.querySelectorAll(":scope > .series-body > .series-shelf")];
+    expect(shelves.map((s) => s.querySelector(".series-title")!.textContent)).toEqual([
+      "On phone", "Not on phone",
+    ]);
+    expect([...shelves[0].querySelectorAll(":scope > .series-body > .series .series-title")]
+      .map((e) => e.textContent)).toEqual(["ALPHA"]);
+    expect([...shelves[1].querySelectorAll(":scope > .series-body > .series .series-title")]
+      .map((e) => e.textContent)).toEqual(["BETA"]);
+    // not-on-phone starts folded, on-phone open, the section open
+    expect(section.classList.contains("collapsed")).toBe(false);
+    expect(shelves[0].classList.contains("collapsed")).toBe(false);
+    expect(shelves[1].classList.contains("collapsed")).toBe(true);
+  });
+
+  it("omits an empty shelf and remembers the section's fold", () => {
+    const section = seriesSection(groupSeries([ep("beta", 1)]).series, () => {})!;
+    const shelves = [...section.querySelectorAll(".series-shelf")];
+    expect(shelves.map((s) => s.querySelector(".series-title")!.textContent)).toEqual(["Not on phone"]);
+    (section.querySelector(":scope > .series-head") as HTMLElement).click();
+    expect(section.classList.contains("collapsed")).toBe(true);
+    expect(localStorage.getItem("fp.series.section.collapsed")).toBe("1");
+    // a shelf the user opened stays open on the next render
+    (shelves[0].querySelector(":scope > .series-head") as HTMLElement).click();
+    const again = seriesSection(groupSeries([ep("beta", 1)]).series, () => {})!;
+    expect(again.querySelector(".series-shelf")!.classList.contains("collapsed")).toBe(false);
   });
 });

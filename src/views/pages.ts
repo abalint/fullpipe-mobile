@@ -19,13 +19,14 @@ import {
   isComplete,
 } from "../manga";
 import { deletePageFiles, getPageRecord, isPageSource } from "../pages";
-import { groupSeries, isDone } from "../series";
+import { finishedEpisodes, groupSeries, isDone } from "../series";
 import type { SeriesGroup } from "../series";
 import {
   cacheJobs,
   clearSubmitted,
   clearTaps,
   getCachedJobs,
+  getViewLog,
   hasPendingActions,
   pendingEnqueues,
   pendingWatched,
@@ -156,14 +157,19 @@ export function volumeRow(job: Job, rerender: () => void, offline: boolean): HTM
 
 /** One manga on the Read tab: header (title · n/N read · m on phone · next
     volume to read/pull) over its volumes in order. */
-export function mangaBlock(g: SeriesGroup, rerender: () => void, offline: boolean): HTMLElement {
+export function mangaBlock(
+  g: SeriesGroup,
+  rerender: () => void,
+  offline: boolean,
+  finished?: ReadonlySet<string>,
+): HTMLElement {
   const block = el("div", "series");
   const key = `fp.manga.collapsed.${g.slug}`;
   if (localStorage.getItem(key) === "1") block.classList.add("collapsed");
   const head = el("div", "series-head");
   const caret = el("span", "muted", block.classList.contains("collapsed") ? "▸" : "▾");
   head.append(caret, el("span", "series-title", g.title));
-  const done = g.episodes.filter(isDone).length;
+  const done = g.episodes.filter((j) => isDone(j, finished)).length;
   const onPhone = g.episodes.filter((j) => isComplete(getMangaRecord(j.episode_id))).length;
   head.appendChild(el("span", "muted", `${done}/${g.episodes.length} read · ${onPhone} on phone`));
   head.addEventListener("click", () => {
@@ -171,7 +177,7 @@ export function mangaBlock(g: SeriesGroup, rerender: () => void, offline: boolea
     caret.textContent = collapsed ? "▸" : "▾";
     localStorage.setItem(key, collapsed ? "1" : "0");
   });
-  const next = g.episodes.find((j) => !isDone(j) && READABLE.includes(j.state));
+  const next = g.episodes.find((j) => !isDone(j, finished) && READABLE.includes(j.state));
   if (next) {
     const label = `Vol ${next.ep_no ?? "?"}`;
     if (isComplete(getMangaRecord(next.episode_id))) {
@@ -417,7 +423,10 @@ export function pagesView(): HTMLElement {
     if (vols.length) {
       list.appendChild(el("h2", "", "Manga"));
       const { standalone, series } = groupSeries(vols);
-      for (const g of series) list.appendChild(mangaBlock(g, rerender, offline));
+      // a volume this phone has already read through counts as read at once
+      // (series.finishedEpisodes) — one pass over the view log, not per row
+      const finished = finishedEpisodes(vols, getViewLog());
+      for (const g of series) list.appendChild(mangaBlock(g, rerender, offline, finished));
       for (const j of standalone)
         list.appendChild(swipeable(volumeRow(j, rerender, offline), () => void removeVolume(j, rerender)));
     }

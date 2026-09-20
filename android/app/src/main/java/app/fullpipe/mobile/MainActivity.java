@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(ShareTargetPlugin.class);
         registerPlugin(PassiveAudioPlugin.class);
+        registerPlugin(VideoDownloadPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

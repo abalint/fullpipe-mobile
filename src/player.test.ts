@@ -980,3 +980,70 @@ describe("player under-video actions", () => {
     root.remove();
   });
 });
+
+// The sitting has to reach the server while you're still on the episode —
+// the bug was every row flipping to `watched` only with the first tap in the
+// next one (2026-09-20).
+describe("player → server handoff", () => {
+  const EP = "yt_handoff";
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  /** Mount with a recording fetch and a fixed media length. */
+  function mount(duration: number) {
+    saveSettings({ serverUrl: "http://pc.ts.net:8321", token: "tok" });
+    const posts: { path: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit = {}) => {
+        const path = new URL(String(url)).pathname;
+        if ((init.method ?? "GET") === "POST")
+          posts.push({ path, body: init.body ? JSON.parse(init.body as string) : {} });
+        if (path === "/viewtime")
+          return new Response(JSON.stringify({ id: "x", duplicate: false }), { status: 200 });
+        return new Response("nope", { status: 404 });
+      }),
+    );
+    const root = playerView(EP);
+    document.body.appendChild(root);
+    const video = root.querySelector("video") as HTMLVideoElement;
+    Object.defineProperty(video, "duration", { value: duration, configurable: true });
+    const sittings = () => posts.filter((p) => p.path === "/viewtime");
+    return { root, video, sittings };
+  }
+
+  /** Play from → to in 0.25 s timeupdate ticks. */
+  const play = (video: HTMLVideoElement, from: number, to: number) => {
+    for (let t = from; t <= to + 1e-9; t += 0.25) {
+      video.currentTime = t;
+      video.dispatchEvent(new Event("timeupdate"));
+    }
+  };
+
+  it("posts the sitting the moment it crosses the finished bar", async () => {
+    const { root, video, sittings } = mount(20); // 80 % = 16 s
+    play(video, 0, 12);
+    await tick();
+    expect(sittings()).toEqual([]); // 60 % — the row isn't finished yet
+    play(video, 12.25, 17);
+    await tick();
+    expect(sittings().length).toBe(1);
+    expect(sittings()[0].body.episode_id).toBe(EP);
+    expect(sittings()[0].body.secs).toBe(16);
+    play(video, 17.25, 19); // the rest of the episode doesn't re-post
+    await tick();
+    expect(sittings().length).toBe(1);
+    root.remove();
+  });
+
+  it("hands the sitting over on `ended`", async () => {
+    const { root, video, sittings } = mount(600); // long episode, bar untouched
+    play(video, 0, 10);
+    await tick();
+    expect(sittings()).toEqual([]);
+    video.dispatchEvent(new Event("ended"));
+    await tick();
+    expect(sittings().length).toBe(1);
+    expect(sittings()[0].body.secs).toBe(10);
+    root.remove();
+  });
+});
