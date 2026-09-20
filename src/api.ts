@@ -14,6 +14,7 @@ import type {
   PageDoc,
   PaintState,
   PrepDoc,
+  SeriesRating,
   Stats,
   TapBatch,
   TranscriptDoc,
@@ -144,6 +145,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ rating, tags, axes, follow, note, review_id: reviewId }),
       }),
+  // Whole-series thumbs verdict (2026-09-20): -2 👎👎 · -1 👎 · 1 👍 · 2 👍👍 ·
+  // null clears. Appended to the ledger's series_taste log; review_id makes
+  // outbox replays idempotent. Rides back as `series_rating` on GET /jobs.
+  rateSeries: (slug: string, rating: SeriesRating | null, reviewId?: string) =>
+    request<{ series: string; rating: SeriesRating | null; duplicate?: boolean }>(
+      `/series/${encodeURIComponent(slug)}/rating`,
+      { method: "POST", body: JSON.stringify({ rating, review_id: reviewId }) }),
   // cards:false is the disliked-it branch — exposures still activate, deck stays clean.
   // The push itself runs server-side in the background: the response says how many
   // cards were queued; progress/errors land on the queue row (`pushing` → `watched`)

@@ -33,6 +33,8 @@ function send(action: OutboxAction): Promise<unknown> {
         action.follow,
         action.note,
       );
+    case "series_rating":
+      return api.rateSeries(action.series, action.rating, action.review_id);
     case "enqueue":
       return api.enqueue(action.source);
     case "passive":

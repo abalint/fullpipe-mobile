@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { epLabel, finishedEpisodes, groupSeries, isDone, nextEpisode, nextToWatch } from "./series";
+import { epLabel, finishedEpisodes, groupSeries, isDone, nextEpisode, nextThumb, nextToWatch, thumbLabel } from "./series";
 import type { Job, ViewSegment } from "./types";
 // @ts-ignore — node types aren't in this tsconfig; the test runs under node anyway
 import { readFileSync } from "node:fs";
@@ -109,5 +109,29 @@ describe("up-next overlay stays out of the way until an episode ends", () => {
     // vitest returns "" for css imports, so read the stylesheet off disk
     const css = readFileSync("src/style.css", "utf8"); // vitest cwd = repo root
     expect(css).toMatch(/\.upnext\[hidden\]\s*\{\s*display:\s*none/);
+  });
+});
+
+describe("nextThumb (whole-series thumbs)", () => {
+  it("unrated → single on the tapped side", () => {
+    expect(nextThumb(null, 1)).toBe(1);
+    expect(nextThumb(undefined, -1)).toBe(-1);
+  });
+  it("tapping the side you're on toggles single ⇄ double", () => {
+    expect(nextThumb(1, 1)).toBe(2);
+    expect(nextThumb(2, 1)).toBe(1);
+    expect(nextThumb(-1, -1)).toBe(-2);
+    expect(nextThumb(-2, -1)).toBe(-1);
+  });
+  it("tapping the other side switches to its single, from single or double", () => {
+    expect(nextThumb(2, -1)).toBe(-1);
+    expect(nextThumb(1, -1)).toBe(-1);
+    expect(nextThumb(-2, 1)).toBe(1);
+    expect(nextThumb(-1, 1)).toBe(1);
+  });
+  it("labels the verdict with the glyph repeated", () => {
+    expect(thumbLabel(2)).toBe("👍👍");
+    expect(thumbLabel(-1)).toBe("👎");
+    expect(thumbLabel(null)).toBe("");
   });
 });

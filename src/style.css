@@ -195,6 +195,23 @@ input {
 .followbtn.block.on { color: var(--dunno); border-color: color-mix(in srgb, var(--dunno) 50%, transparent);
                       background: color-mix(in srgb, var(--dunno) 18%, transparent); }
 
+/* Whole-series thumbs (2026-09-20): 👎 / 👍 on the series header and the
+   player's close-out for a box-set episode. Single = tinted; double = the
+   glyph doubled and a solid ring. */
+.thumbs { display: inline-flex; gap: 4px; flex: none; }
+.thumb { border: 1px solid transparent; background: transparent; padding: 3px 7px;
+         font-size: 1.05rem; line-height: 1; border-radius: 99px;
+         filter: grayscale(1); opacity: .55; }
+.thumb.on { filter: none; opacity: 1; }
+.thumb.up.on { border-color: color-mix(in srgb, var(--know) 50%, transparent);
+               background: color-mix(in srgb, var(--know) 18%, transparent); }
+.thumb.down.on { border-color: color-mix(in srgb, var(--dunno) 50%, transparent);
+                 background: color-mix(in srgb, var(--dunno) 18%, transparent); }
+.thumb.dbl { font-size: .95rem; letter-spacing: -.25em; padding-right: 11px; }
+.thumb.up.dbl { border-color: var(--know); }
+.thumb.down.dbl { border-color: var(--dunno); }
+.series-thumbs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 3px; }
+
 .chip { font-size: .72rem; padding: 1px 8px; border-radius: 99px;
         background: var(--border); color: var(--muted); }
 .chip.st-prepared { background: color-mix(in srgb, var(--accent) 25%, transparent); color: var(--accent); }

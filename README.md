@@ -3,7 +3,8 @@
 The phone side of `fullPipe/MOBILE.md`: queue screen · in-app learning
 player (tokenized tap-able subs, replay-line, speed) with the episode's
 close-out under the video (synopsis · rating · delete / passive / mint cards)
-· tap outbox with idempotent sync · 1–5★ rating + taste-tag picker · Android
+· tap outbox with idempotent sync · 1–5★ rating + taste-tag picker (series:
+👎/👍 thumbs for the whole set) · Android
 share-sheet enqueue target. Capacitor (web UI wrapped native). The prep page
 was removed 2026-09-10 — the player is the only per-episode screen.
 
@@ -64,6 +65,14 @@ APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
   (autoplays after 8 s if the next one is downloaded — Settings → Playback).
   Swipe-delete on a series row is **phone-local**: only the video + sidecars
   leave the phone; the PC keeps everything, ⬇ brings it back.
+  **A series is rated as a whole** (2026-09-20): the header and the player's
+  close-out show a 👎 / 👍 pair (`thumbsBlock` in `views/queue.ts`,
+  `nextThumb` in `series.ts`) — tap the side you're on to toggle single ⇄
+  double, tap the other side to switch. Episode rows in a series carry no
+  star/survey block. Queued as a `series_rating` outbox action (replaces an
+  unsent one for the same series; client `review_id`), flushed to
+  `POST /series/{slug}/rating`; `series_rating` on every episode row is the
+  server's current verdict, so the header reads right offline.
 
 - **Offline:** downloaded episodes are fully usable without the server. The
   `⬇` bundle is video + subs + transcript + definitions + the prep doc; prep

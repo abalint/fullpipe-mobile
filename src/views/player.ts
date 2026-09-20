@@ -74,7 +74,7 @@ import {
   queueWatched,
 } from "../store";
 import { onTapSync, scheduleTapSync, syncTapsNow } from "../livesync";
-import { ratingBlock, removeJob } from "./queue";
+import { ratingBlock, removeJob, thumbsBlock } from "./queue";
 import { flushSoon } from "../sync";
 import { ViewRecorder } from "../viewtime";
 import {
@@ -89,7 +89,6 @@ import {
 } from "../video";
 import { downloadStatus } from "../downloads";
 import type {
-  FollowState,
   GrammarPoint,
   Definitions,
   Job,
@@ -669,31 +668,36 @@ export function playerView(episodeId: string, startAt?: number): HTMLElement {
   // progress.
   let engaged = false;
   const stars = el("div", "player-rating");
-  const mountRating = (
-    rating: number | null,
-    tags: string[],
-    axes: Record<string, number> = {},
-    follow: FollowState | null = null,
-  ) => {
+  const mountRating = (j: Job | undefined) => {
     stars.textContent = "";
+    const queued = () => (barStatus.textContent = "rating queued — will sync when reachable");
+    if (j?.series) {
+      // a box-set episode: the series is rated as a whole (2026-09-20) —
+      // 👎 / 👍 for the set, no per-episode survey
+      const row = el("div", "series-thumbs");
+      row.appendChild(el("span", "muted", `${j.series_title || j.series} · whole series`));
+      row.appendChild(thumbsBlock(j.series, j.series_rating ?? null, () => (engaged = true), queued));
+      stars.appendChild(row);
+      return;
+    }
     stars.appendChild(
       ratingBlock(
         episodeId,
-        rating,
-        tags,
+        j?.rating ?? null,
+        j?.tags ?? [],
         () => (engaged = true),
-        () => (barStatus.textContent = "rating queued — will sync when reachable"),
-        axes,
-        follow,
+        queued,
+        j?.axes ?? {},
+        j?.follow ?? null,
       ),
     );
   };
-  mountRating(job?.rating ?? null, job?.tags ?? [], job?.axes ?? {}, job?.follow ?? null);
+  mountRating(job);
   void api
     .getJob(episodeId)
     .then((j) => {
       job = j;
-      if (!engaged) mountRating(j.rating ?? null, j.tags ?? [], j.axes ?? {}, j.follow ?? null);
+      if (!engaged) mountRating(j);
     })
     .catch(() => {});
 

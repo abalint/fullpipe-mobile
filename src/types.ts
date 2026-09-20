@@ -44,6 +44,10 @@ export interface Job {
   series?: string | null;
   series_title?: string | null;
   ep_no?: number | null;
+  /** The whole box set's thumbs verdict (2026-09-20; ledger series_taste):
+      -2 👎👎 · -1 👎 · 1 👍 · 2 👍👍 · null unrated. Rides on every episode
+      of the series; series episodes carry no per-episode survey. */
+  series_rating?: SeriesRating | null;
   duration?: number | null; // runtime in seconds, once Stage 1 has artifacts
   comprehensibility?: number | null; // coverage's token_comprehensibility, 0..1
   error?: string | null;
@@ -482,6 +486,10 @@ export interface ViewSegment {
   played?: [number, number][];
 }
 
+/** A series' thumbs verdict: double / single thumbs down, single / double
+    thumbs up (series.ts nextThumb cycles them). */
+export type SeriesRating = -2 | -1 | 1 | 2;
+
 /** One queued offline action. The outbox is FIFO (an episode's taps flush
     before its watched), and every kind is replay-safe server-side: taps
     dedupe on batch_id, ratings on review_id, watched/enqueue are idempotent. */
@@ -499,6 +507,7 @@ export type OutboxAction =
       note: string;
       review_id: string;
     }
+  | { id: string; kind: "series_rating"; series: string; rating: SeriesRating | null; review_id: string }
   | { id: string; kind: "enqueue"; source: string }
   | { id: string; kind: "passive"; episode_id: string; passive: boolean }
   | { id: string; kind: "viewtime"; segment: ViewSegment }

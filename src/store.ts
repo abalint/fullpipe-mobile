@@ -15,6 +15,7 @@ import type {
   Job,
   OutboxAction,
   PrepDoc,
+  SeriesRating,
   Stats,
   TapBatch,
   TapEntry,
@@ -278,6 +279,7 @@ function pushAction(action: OutboxAction): void {
 export function actionEpisode(a: OutboxAction): string {
   if (a.kind === "taps") return a.batch.episode_id;
   if (a.kind === "enqueue") return "";
+  if (a.kind === "series_rating") return "";
   if (a.kind === "viewtime") return a.segment.episode_id;
   if (a.kind === "viewtime_delete") return "";
   return a.episode_id;
@@ -348,6 +350,17 @@ export function queueRating(
   });
 }
 
+/** Queue a whole-series thumbs verdict (2026-09-20). Replaces a pending
+    unsent one for the series — the taps cycle 👍 ⇄ 👍👍, only the last
+    state matters. The client-minted review_id makes the POST replay-safe. */
+export function queueSeriesRating(series: string, rating: SeriesRating | null): void {
+  write(
+    K.outbox,
+    getOutbox().filter((a) => !(a.kind === "series_rating" && a.series === series)),
+  );
+  pushAction({ id: newId(), kind: "series_rating", series, rating, review_id: newId() });
+}
+
 /** Queue a passive shelve/un-shelve for later flush (server unreachable at
     watch time). Replaces a pending one for the episode — the latest flag wins.
     Enqueued after the watched action so FIFO lands it once the server has moved
@@ -409,6 +422,13 @@ export function pendingRating(episodeId: string): {
     : null;
 }
 
+/** The series' unsent thumbs verdict, if one is queued: {rating} (rating
+    null = a queued clear), else null when nothing is pending. */
+export function pendingSeriesRating(series: string): { rating: SeriesRating | null } | null {
+  const a = getOutbox().find((x) => x.kind === "series_rating" && x.series === series);
+  return a && a.kind === "series_rating" ? { rating: a.rating } : null;
+}
+
 export function pendingEnqueues(): string[] {
   return getOutbox().flatMap((a) => (a.kind === "enqueue" ? [a.source] : []));
 }
@@ -427,6 +447,7 @@ export function outboxSummary(): string {
     taps: ["tap batch", "tap batches"],
     watched: ["watched", "watched"],
     rating: ["rating", "ratings"],
+    series_rating: ["series rating", "series ratings"],
     enqueue: ["enqueue", "enqueues"],
     passive: ["shelve", "shelves"],
     viewtime: ["time entry", "time entries"],

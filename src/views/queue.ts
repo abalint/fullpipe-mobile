@@ -19,14 +19,16 @@ import {
   pendingEnqueues,
   pendingPassive,
   pendingRating,
+  pendingSeriesRating,
   pendingWatched,
   queueEnqueue,
   queueRating,
+  queueSeriesRating,
   removeEpisodeActions,
 } from "../store";
 import { flushOutbox } from "../sync";
 import { isPageSource } from "../pages";
-import { epLabel, finishedEpisodes, groupSeries, isDone, isSeries, nextToWatch } from "../series";
+import { epLabel, finishedEpisodes, groupSeries, isDone, isSeries, nextThumb, nextToWatch } from "../series";
 import type { SeriesGroup } from "../series";
 import { filterJobs, listControls, sortJobs } from "../listfilter";
 import { deleteVideo, getPosition, getVideoRecord, refreshSidecars } from "../video";
@@ -38,7 +40,7 @@ import {
   startDownload,
   watchDownloads,
 } from "../downloads";
-import type { FollowState, Job, JobState } from "../types";
+import type { FollowState, Job, JobState, SeriesRating } from "../types";
 import { FOLLOW_OPTIONS, SURVEY_AXES } from "../types";
 
 const STAGE1: JobState[] = ["downloading", "transcribing", "tokenizing"];
@@ -386,6 +388,60 @@ export function ratingBlock(
   return wrap;
 }
 
+/** A whole-series thumbs verdict (2026-09-20): two buttons, 👎 and 👍. A
+    tap on the side you're on toggles single ⇄ double (series.nextThumb);
+    the other side switches to its single. Keeps its own state like
+    ratingBlock, so tapping never reloads the list; a pending outbox
+    verdict overlays the server's. Shared by the series header on the
+    queue and the player's close-out for a series episode. */
+export function thumbsBlock(
+  series: string,
+  initial: SeriesRating | null | undefined,
+  onInteract?: () => void,
+  onQueued?: () => void,
+): HTMLElement {
+  const wrap = el("div", "thumbs");
+  const pending = pendingSeriesRating(series);
+  let rating: SeriesRating | null = pending ? pending.rating : (initial ?? null);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const send = () => {
+    if (timer) clearTimeout(timer);
+    const r = rating;
+    timer = setTimeout(() => {
+      queueSeriesRating(series, r);
+      void flushOutbox().then((res) => {
+        if (res.error && pendingSeriesRating(series)) onQueued?.();
+      });
+    }, 450); // coalesce the 👍 → 👍👍 double-tap into one review
+  };
+  const buttons: [1 | -1, HTMLButtonElement][] = [];
+  const paint = () => {
+    for (const [dir, b] of buttons) {
+      const on = rating != null && Math.sign(rating) === dir;
+      const dbl = on && Math.abs(rating!) === 2;
+      b.classList.toggle("on", on);
+      b.classList.toggle("dbl", dbl);
+      b.textContent = (dir > 0 ? "👍" : "👎").repeat(dbl ? 2 : 1);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  };
+  for (const dir of [-1, 1] as const) {
+    const b = el("button", `thumb ${dir > 0 ? "up" : "down"}`) as HTMLButtonElement;
+    b.title = dir > 0 ? "Thumbs up — tap again for double" : "Thumbs down — tap again for double";
+    b.addEventListener("click", (e) => {
+      e.stopPropagation(); // sits inside the collapsible header
+      onInteract?.();
+      rating = nextThumb(rating, dir);
+      paint();
+      send();
+    });
+    buttons.push([dir, b]);
+    wrap.appendChild(b);
+  }
+  paint();
+  return wrap;
+}
+
 export function jobRow(
   job: Job,
   rerender: () => void,
@@ -440,8 +496,9 @@ export function jobRow(
 
   // ratable once curation has written the episode to the ledger — including
   // before watched, so a dud can be rated and swiped away without ever
-  // pushing its cards
-  if (RATABLE.includes(state)) {
+  // pushing its cards. Series episodes carry no per-episode survey: the
+  // box set is rated as a whole on its header (thumbsBlock, 2026-09-20).
+  if (RATABLE.includes(state) && !isSeries(job)) {
     // ratingBlock keeps its own state (star + tags) so tapping never triggers a
     // full list reload that would collapse the picker mid-selection.
     main.appendChild(
@@ -710,6 +767,9 @@ export function seriesBlock(
       );
     }
   }
+  // the whole set's thumbs verdict (every episode row carries it; take the
+  // first) — the only rating a series gets (2026-09-20)
+  head.appendChild(thumbsBlock(g.slug, g.episodes[0]?.series_rating ?? null, onRatingTouch));
   for (const j of g.episodes)
     body.appendChild(
       swipeable(jobRow(j, rerender, onRatingTouch, offline, finished), () =>

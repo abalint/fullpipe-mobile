@@ -8,7 +8,7 @@
 // plus, since 2026-09-20, the phone's own view log, so the lists don't sit an
 // episode behind what was just played.
 
-import type { Job, ViewSegment } from "./types";
+import type { Job, SeriesRating, ViewSegment } from "./types";
 
 export interface SeriesGroup {
   slug: string;
@@ -117,4 +117,21 @@ export function nextEpisode(jobs: Job[], episodeId: string): Job | null {
     the server hasn't been told about yet. */
 export function nextToWatch(g: SeriesGroup, finished?: ReadonlySet<string>): Job | null {
   return g.episodes.find((j) => !isDone(j, finished)) ?? null;
+}
+
+/** The thumbs verdict a tap on 👍 (`dir` 1) or 👎 (`dir` -1) lands on
+    (2026-09-20). A series is rated as a whole, on a four-step scale
+    -2 👎👎 · -1 👎 · 1 👍 · 2 👍👍. Tapping the thumb you're already on
+    toggles single ⇄ double; tapping the other side switches to its single.
+    Unrated → single. No tap clears: the verdict only ever moves. */
+export function nextThumb(current: SeriesRating | null | undefined, dir: 1 | -1): SeriesRating {
+  const cur = current ?? 0;
+  if (Math.sign(cur) !== dir) return dir; // other side (or unrated) → single
+  return (Math.abs(cur) === 1 ? 2 * dir : dir) as SeriesRating; // single ⇄ double
+}
+
+/** "👍👍" / "👎" / "" for a series' verdict — the compact readout on lists. */
+export function thumbLabel(rating: SeriesRating | null | undefined): string {
+  if (!rating) return "";
+  return (rating > 0 ? "👍" : "👎").repeat(Math.abs(rating));
 }

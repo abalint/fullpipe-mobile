@@ -18,11 +18,13 @@ import {
   getSubmitted,
   getTaps,
   pendingRating,
+  pendingSeriesRating,
   pendingTapCount,
   pendingWatched,
   queueEnqueue,
   queuePassive,
   queueRating,
+  queueSeriesRating,
   queueWatched,
   removeEpisodeActions,
   saveSettings,
@@ -36,7 +38,7 @@ import {
 } from "./store";
 import { flushOutbox } from "./sync";
 import { api, ApiError } from "./api";
-import { backlogSeconds, hms, jobRow, pendingVideoDownloads, seriesBlock, seriesSection, sortJobs, starBar }
+import { backlogSeconds, hms, jobRow, pendingVideoDownloads, seriesBlock, seriesSection, sortJobs, starBar, thumbsBlock }
   from "./views/queue";
 import { groupSeries } from "./series";
 import { statsView } from "./views/stats";
@@ -708,6 +710,76 @@ describe("seriesBlock (series.ts grouping on the queue)", () => {
     (block.querySelector(".series-head") as HTMLElement).click();
     expect(block.classList.contains("collapsed")).toBe(true);
     expect(localStorage.getItem("fp.series.collapsed.hotspot")).toBe("1");
+  });
+  it("rates the set as a whole on the header; episode rows carry no survey", () => {
+    const rows = [ep(1, "watched"), ep(2, "staged")].map((j) => ({ ...j, series_rating: 2 as const }));
+    const g = groupSeries(rows).series[0];
+    const block = seriesBlock(g, () => {});
+    const head = block.querySelector(".series-head")!;
+    const up = head.querySelector<HTMLButtonElement>(".thumb.up")!;
+    expect(up.textContent).toBe("👍👍");
+    expect(up.classList.contains("dbl")).toBe(true);
+    expect(head.querySelector(".thumb.down")!.classList.contains("on")).toBe(false);
+    expect(block.querySelectorAll(".series-body .rating").length).toBe(0);
+    expect(block.querySelectorAll(".series-body .stars").length).toBe(0);
+    // tapping the thumb doesn't fold the header
+    up.click();
+    expect(block.classList.contains("collapsed")).toBe(false);
+  });
+});
+
+describe("thumbsBlock (whole-series thumbs)", () => {
+  it("cycles 👍 → 👍👍 → 👍 and flips sides, coalescing taps into one queued verdict", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 0 }))); // unreachable
+    const w = thumbsBlock("hotspot", null);
+    const up = w.querySelector<HTMLButtonElement>(".thumb.up")!;
+    const down = w.querySelector<HTMLButtonElement>(".thumb.down")!;
+    expect(up.classList.contains("on")).toBe(false);
+    up.click();
+    expect(up.textContent).toBe("👍");
+    expect(up.classList.contains("on")).toBe(true);
+    up.click();
+    expect(up.textContent).toBe("👍👍");
+    up.click();
+    expect(up.textContent).toBe("👍");
+    down.click();
+    expect(up.classList.contains("on")).toBe(false);
+    expect(down.textContent).toBe("👎");
+    down.click();
+    expect(down.textContent).toBe("👎👎");
+    expect(getOutbox().length).toBe(0); // still debouncing
+    await vi.advanceTimersByTimeAsync(500);
+    const queued = getOutbox().filter((a) => a.kind === "series_rating");
+    expect(queued.length).toBe(1); // five taps → one review
+    expect(queued[0].kind === "series_rating" && queued[0].rating).toBe(-2);
+    expect(pendingSeriesRating("hotspot")?.rating).toBe(-2);
+    // a fresh block reads the pending verdict over a stale server value
+    const again = thumbsBlock("hotspot", 1);
+    expect(again.querySelector(".thumb.down")!.textContent).toBe("👎👎");
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+  it("flushes as POST /series/{slug}/rating with a replay-safe review_id", async () => {
+    saveSettings({ serverUrl: "http://pc.ts.net:8321", token: "tok" });
+    queueSeriesRating("hotspot", 2);
+    queueSeriesRating("hotspot", 1); // replaces the unsent one
+    expect(getOutbox().filter((a) => a.kind === "series_rating").length).toBe(1);
+    const posted: { url: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        posted.push({ url: String(url), body: JSON.parse(init.body as string) });
+        return new Response(JSON.stringify({ series: "hotspot", rating: 1 }), { status: 200 });
+      }),
+    );
+    const res = await flushOutbox();
+    expect(res.sent).toBe(1);
+    expect(posted[0].url).toBe("http://pc.ts.net:8321/series/hotspot/rating");
+    expect(posted[0].body.rating).toBe(1);
+    expect(typeof posted[0].body.review_id).toBe("string");
+    expect(pendingSeriesRating("hotspot")).toBeNull();
+    vi.unstubAllGlobals();
   });
 });
 
