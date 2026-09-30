@@ -57,6 +57,11 @@ public class VideoDownloadService extends Service {
     /** ep → result JSON, awaiting the JS ack (VideoDownloadPlugin.ack). */
     static final String RESULTS_PREFS = "fp_video_downloads";
     private static final int ATTEMPTS = 3;
+    /** How long a file may sit at "restoring" — the server answering 503 +
+        Retry-After while it pulls an evicted series episode back from the
+        media server (a copy takes ~1 min, a cold re-transcode a few). */
+    private static final long RESTORE_WAIT_MS = 15 * 60_000L;
+    private static final long RESTORE_POLL_DEFAULT_MS = 10_000L;
     private static final int CONNECT_TIMEOUT_MS = 15_000;
     private static final int READ_TIMEOUT_MS = 60_000;
     private static final long PROGRESS_EVERY_MS = 250;
@@ -288,8 +293,11 @@ public class VideoDownloadService extends Service {
     }
 
     /** One file, three attempts, resuming a leftover .part with a Range
-        request. HTTP 4xx/5xx is final (no point retrying a 404); connection
-        drops retry after a short pause. */
+        request. HTTP 4xx/5xx is final (no point retrying a 404) — except
+        503, which is the server saying "restoring this from the media
+        server, retry after N s" (an evicted series episode): that is
+        polled, up to RESTORE_WAIT_MS, with the phase shown as "restoring".
+        Connection drops retry after a short pause. */
     private void download(FileSpec f, Job job) throws IOException {
         File dest = new File(getFilesDir(), f.path);
         File part = new File(dest.getPath() + ".part");
@@ -297,6 +305,7 @@ public class VideoDownloadService extends Service {
         if (dir != null && !dir.exists() && !dir.mkdirs() && !dir.exists())
             throw new IOException("cannot create " + dir);
         IOException last = null;
+        long restoreSince = 0;
         for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
             if (attempt > 0) SystemClock.sleep(1500L * attempt);
             long have = part.exists() ? part.length() : 0;
@@ -322,9 +331,28 @@ public class VideoDownloadService extends Service {
                     continue;
                 } else if (code >= 200 && code < 300) {
                     append = false;
+                } else if (code == 503) {
+                    long now = SystemClock.elapsedRealtime();
+                    if (restoreSince == 0) restoreSince = now;
+                    if (now - restoreSince > RESTORE_WAIT_MS)
+                        throw new IOException("still restoring after 15 min — try again later");
+                    long wait = RESTORE_POLL_DEFAULT_MS;
+                    try {
+                        String ra = c.getHeaderField("Retry-After");
+                        if (ra != null) wait = Math.max(2_000L, Math.min(60_000L, Long.parseLong(ra.trim()) * 1000L));
+                    } catch (NumberFormatException ignored) {
+                    }
+                    setPhase(f.required ? "restoring" : "sidecars");
+                    if (f.required) report(job, 0, -1);
+                    c.disconnect();
+                    c = null;
+                    SystemClock.sleep(wait);
+                    attempt--; // polling is not a failed attempt
+                    continue;
                 } else {
                     throw new HttpStatusException(code);
                 }
+                if (restoreSince != 0) setPhase(f.required ? "video" : "sidecars");
                 long len = c.getContentLengthLong();
                 long done = append ? have : 0;
                 long total = len >= 0 ? done + len : -1;
@@ -367,6 +395,12 @@ public class VideoDownloadService extends Service {
     private static class HttpStatusException extends IOException {
         HttpStatusException(int code) {
             super("HTTP " + code);
+        }
+    }
+
+    private void setPhase(String phase) {
+        synchronized (lock) {
+            currentPhase = phase;
         }
     }
 
@@ -440,6 +474,8 @@ public class VideoDownloadService extends Service {
             String more = waiting > 0 ? " · " + waiting + " more queued" : "";
             if ("sidecars".equals(phase)) {
                 b.setContentText("finishing" + more).setProgress(0, 0, true);
+            } else if ("restoring".equals(phase)) {
+                b.setContentText("restoring on the server…" + more).setProgress(0, 0, true);
             } else if (total > 0) {
                 int pct = (int) Math.min(100, bytes * 100 / total);
                 b.setContentText(pct + "% · " + mb(bytes) + " / " + mb(total) + more)

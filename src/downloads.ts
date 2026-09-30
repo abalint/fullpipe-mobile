@@ -23,7 +23,10 @@ import { api } from "./api";
 import { getSettings } from "./store";
 import { downloadVideo, finalizeVideoRecord, videoPaths } from "./video";
 
-export type DownloadPhase = "queued" | "video" | "sidecars";
+/** `restoring`: the server answered 503 — it is pulling an evicted series
+    episode back from the media server and the native downloader is polling
+    it (Retry-After) rather than failing. */
+export type DownloadPhase = "queued" | "video" | "sidecars" | "restoring";
 
 export interface DownloadStatus {
   phase: DownloadPhase;
@@ -99,10 +102,12 @@ export function onDownloadChange(fn: (c: DownloadChange) => void): () => void {
   return () => void listeners.delete(fn);
 }
 
-/** Button text for a live download: "⬇ queued" · "⬇ 42%" · "⬇ 12 MB" (no
-    length known) · "⬇ finishing…" (sidecars). */
+/** Button text for a live download: "⬇ queued" · "⬇ restoring…" (the
+    server is pulling the episode back from the media server) · "⬇ 42%" ·
+    "⬇ 12 MB" (no length known) · "⬇ finishing…" (sidecars). */
 export function downloadLabel(s: DownloadStatus, prefix = "⬇"): string {
   if (s.phase === "queued") return `${prefix} queued`;
+  if (s.phase === "restoring") return `${prefix} restoring…`;
   if (s.phase === "sidecars") return `${prefix} finishing…`;
   if (s.total && s.total > 0) return `${prefix} ${Math.min(100, Math.round((s.bytes / s.total) * 100))}%`;
   return `${prefix} ${Math.round(s.bytes / 1e6)} MB`;

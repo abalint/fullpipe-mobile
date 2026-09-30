@@ -178,5 +178,6 @@ describe("downloads", () => {
     expect(downloadLabel({ phase: "video", bytes: 50, total: 200 }, "↻")).toBe("↻ 25%");
     expect(downloadLabel({ phase: "video", bytes: 12_400_000, total: null })).toBe("⬇ 12 MB");
     expect(downloadLabel({ phase: "sidecars", bytes: 1, total: 1 })).toBe("⬇ finishing…");
+    expect(downloadLabel({ phase: "restoring", bytes: 0, total: null })).toBe("⬇ restoring…");
   });
 });
