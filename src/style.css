@@ -437,6 +437,27 @@ details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: po
   background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
 /* small key/value list for the evidence breakdown */
+.media-wrap { overflow-x: auto; margin: 8px 0 12px; }
+.media-table { border-collapse: collapse; width: 100%; font-size: .85rem;
+  font-variant-numeric: tabular-nums; }
+.media-table th, .media-table td { padding: 5px 6px; text-align: right; white-space: nowrap; }
+.media-table thead th { color: var(--muted); font-weight: 600; font-size: .78rem;
+  border-bottom: 1px solid var(--border, rgba(128,128,128,.3)); }
+.media-table tbody th { text-align: left; font-weight: 500; color: var(--fg); }
+.media-table tbody th.sub { color: var(--muted); padding-left: 14px; font-weight: 400; }
+.media-table td { color: var(--fg); }
+.speed-card { background: var(--card); border-radius: 12px; padding: 10px 8px 8px; margin: 8px 0; }
+.speed-svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+.speed-svg .grid { stroke: var(--muted); stroke-opacity: .25; stroke-width: 1; }
+.speed-svg .ylab, .speed-svg .xlab { fill: var(--muted); font-size: 10px; }
+.speed-svg .speed-line { fill: none; stroke: var(--accent); stroke-width: 2;
+  stroke-linejoin: round; stroke-linecap: round; }
+.speed-svg .speed-dot { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+.speed-svg .speed-dot.hot { r: 5.5; }
+.speed-svg .cross { stroke: var(--muted); stroke-opacity: .6; stroke-width: 1; stroke-dasharray: 3 3; }
+.speed-tip { font-size: .8rem; color: var(--fg); padding: 6px 6px 0; font-variant-numeric: tabular-nums; }
+.speed-now { font-size: .78rem; color: var(--muted); padding: 4px 6px 0; }
+.speed-table summary { font-size: .85rem; color: var(--muted); cursor: pointer; padding: 4px 0; }
 .kv { display: grid; grid-template-columns: 1fr max-content; gap: 4px 14px;
       font-size: .85rem; }
 .kv .k { color: var(--muted); }

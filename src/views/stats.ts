@@ -16,7 +16,7 @@ import {
 import { flushOutbox } from "../sync";
 import { importListenLog } from "../viewtime";
 import { renderViewtime } from "./viewtime";
-import type { Stats, ViewSegment } from "../types";
+import type { MediumStats, ReadingPoint, Stats, ViewSegment } from "../types";
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
   const n = document.createElement(tag);
@@ -118,6 +118,11 @@ function renderStats(bannerBox: HTMLElement, root: HTMLElement, s: Stats): void 
   line("Words you want to learn", s.want_to_learn);
   root.appendChild(kv);
 
+  // watching / reading / listening side by side (2026-09-22): what each
+  // medium has shown you, what you looked up and marked there, and what it
+  // tipped into known. Hidden on a pre-media server.
+  if (s.media) renderMedia(root, s);
+
   // phrases + grammar — the two sibling tracked axes (GRAMMAR.md). Hidden
   // entirely on pre-grammar servers / before anything is tracked.
   const phrasesTracked = (s.phrases_known ?? 0) + (s.phrases_learning ?? 0);
@@ -133,30 +138,243 @@ function renderStats(bannerBox: HTMLElement, root: HTMLElement, s: Stats): void 
         `+${nf.format(s.grammar_learning ?? 0)} learning`, "know"));
     root.appendChild(grid2);
   }
+}
 
-  // evidence provenance — where the known-set came from
-  const src = s.evidence_by_source;
-  // Note: there's no "marked unknown" — the tap cycle is known → want-to-learn
-  // → clear; anything not marked known is unknown by default. Legacy
-  // tap_unknown evidence (from the removed option) is intentionally not shown.
-  const SRC_LABELS: Record<string, string> = {
-    exposure: "Exposures (words met while watching)",
-    tap_known: "Marked known",
-    tap_interest: "Marked to learn",
-    import: "Imported from an external list",
-    mined_card: "Mined cards",
-    card_lapse: "Card lapses",
-  };
-  const keys = Object.keys(SRC_LABELS).filter((k) => src[k]);
-  if (keys.length) {
-    root.appendChild(el("h2", "", "Evidence on record"));
-    const kv2 = el("div", "kv");
-    for (const k of keys) {
-      kv2.appendChild(el("span", "k", SRC_LABELS[k]));
-      kv2.appendChild(el("span", "v", nf.format(src[k])));
-    }
-    root.appendChild(kv2);
+const MEDIA: { key: "watch" | "read" | "listen"; label: string }[] = [
+  { key: "watch", label: "▶ watching" },
+  { key: "read", label: "📖 reading" },
+  { key: "listen", label: "🎧 listening" },
+];
+
+/** The per-medium table: one column per medium, one row per measure. Rows
+    that are zero across every medium are skipped (a listener with no reads
+    yet still sees a reading column — the split is the point). */
+function renderMedia(root: HTMLElement, s: Stats): void {
+  const m = s.media!;
+  root.appendChild(el("h2", "", "By medium"));
+  root.appendChild(el(
+    "div", "muted",
+    "Words only. What each medium has shown you. Words seen count every sighting your sittings " +
+    "played; unique words are the distinct ones. \"First met\" credits the medium a word " +
+    "turned up in first; \"became known\" counts the words a mark or confirm made there " +
+    "tipped into known.",
+  ));
+  const h1 = (n: number) => (n >= 10 ? nf.format(Math.round(n)) : n.toFixed(1));
+  const num = (v?: number | null) => (v ? nf.format(Math.round(v)) : "");
+  const rows: { label: string; get: (x: MediumStats) => string; nonzero: (x: MediumStats) => boolean }[] = [
+    { label: "Hours", get: (x) => h1(x.hours), nonzero: (x) => x.hours > 0 },
+    { label: "Sittings", get: (x) => nf.format(x.sittings), nonzero: (x) => x.sittings > 0 },
+    { label: "Episodes / volumes", get: (x) => nf.format(x.episodes), nonzero: (x) => x.episodes > 0 },
+    { label: "Pages read", get: (x) => num(x.pages_read), nonzero: (x) => !!x.pages_read },
+    { label: "…page turns", get: (x) => num(x.pages_turned), nonzero: (x) => !!x.pages_turned },
+    { label: "Words seen", get: (x) => nf.format(x.words_seen), nonzero: (x) => x.words_seen > 0 },
+    { label: "…per hour", get: (x) => num(x.words_per_hour), nonzero: (x) => !!x.words_per_hour },
+    { label: "Characters read", get: (x) => num(x.chars_read), nonzero: (x) => !!x.chars_read },
+    { label: "…per minute", get: (x) => num(x.chars_per_minute), nonzero: (x) => !!x.chars_per_minute },
+    { label: "Unique words", get: (x) => nf.format(x.unique_words), nonzero: (x) => x.unique_words > 0 },
+    { label: "…only here", get: (x) => nf.format(x.only_here), nonzero: (x) => x.only_here > 0 },
+    { label: "…known now", get: (x) => nf.format(x.unique_known), nonzero: (x) => x.unique_known > 0 },
+    { label: "First met here", get: (x) => nf.format(x.first_met), nonzero: (x) => x.first_met > 0 },
+    { label: "…known now", get: (x) => nf.format(x.first_met_known), nonzero: (x) => x.first_met_known > 0 },
+    { label: "Lookups", get: (x) => nf.format(x.lookups), nonzero: (x) => x.lookups > 0 },
+    { label: "…distinct words", get: (x) => nf.format(x.unique_looked_up), nonzero: (x) => x.unique_looked_up > 0 },
+    { label: "Marked known ✓", get: (x) => nf.format(x.marked_known), nonzero: (x) => x.marked_known > 0 },
+    { label: "Marked to learn ★", get: (x) => nf.format(x.marked_interest), nonzero: (x) => x.marked_interest > 0 },
+    { label: "Marked unknown ✗", get: (x) => nf.format(x.marked_unknown), nonzero: (x) => x.marked_unknown > 0 },
+    { label: "Became known", get: (x) => nf.format(x.became_known), nonzero: (x) => x.became_known > 0 },
+    { label: `…last ${m.since_days} days`, get: (x) => nf.format(x.became_known_30d), nonzero: (x) => x.became_known_30d > 0 },
+    { label: "Back to learning", get: (x) => nf.format(x.became_learning), nonzero: (x) => x.became_learning > 0 },
+  ];
+  const wrap = el("div", "media-wrap");
+  const table = document.createElement("table");
+  table.className = "media-table";
+  const thead = table.createTHead();
+  const hr = thead.insertRow();
+  hr.appendChild(document.createElement("th"));
+  for (const c of MEDIA) {
+    const th = document.createElement("th");
+    th.textContent = c.label;
+    hr.appendChild(th);
   }
+  const tbody = table.createTBody();
+  for (const r of rows) {
+    if (!MEDIA.some((c) => r.nonzero(m.media[c.key]))) continue;
+    const tr = tbody.insertRow();
+    const th = document.createElement("th");
+    th.textContent = r.label;
+    if (r.label.startsWith("…")) th.className = "sub";
+    tr.appendChild(th);
+    for (const c of MEDIA) {
+      const td = tr.insertCell();
+      const x = m.media[c.key];
+      td.textContent = r.nonzero(x) ? r.get(x) : "–";
+    }
+  }
+  wrap.appendChild(table);
+  root.appendChild(wrap);
+
+  if (m.reading && m.reading.days.length) renderReadingSpeed(root, m.reading.days);
+
+  // marks made outside any medium — a list review, the confirm queue
+  const e = m.elsewhere;
+  const kv = el("div", "kv");
+  const line = (k: string, v: number) => {
+    if (!v) return;
+    kv.appendChild(el("span", "k", k));
+    kv.appendChild(el("span", "v", nf.format(v)));
+  };
+  line("Marked known from a list review", e.list.marked_known);
+  line("Marked unknown from a list review", e.list.marked_unknown);
+  line("Confirmed known (\"do you know this?\")", e.confirm.confirmed ?? 0);
+  line("Deferred (\"not yet\")", e.confirm.deferred ?? 0);
+  line("Became known via an import", e.import.became_known);
+  if (kv.childElementCount) root.appendChild(kv);
+}
+
+const SVG = "http://www.w3.org/2000/svg";
+
+function svgEl<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
+  const n = document.createElementNS(SVG, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+  return n;
+}
+
+function shortDay(day: string): string {
+  const [, mm, dd] = day.split("-");
+  return `${Number(mm)}/${Number(dd)}`;
+}
+
+/** Reading speed over time: one line, characters per minute by day — the
+    unit Japanese readers measure themselves in (字/分; adult prose reads
+    around 500–600) — with a gap on days nothing was measured, a crosshair +
+    tooltip on touch / hover, and the same points as a table underneath. */
+function renderReadingSpeed(root: HTMLElement, days: ReadingPoint[]): void {
+  root.appendChild(el("h2", "", "Reading speed"));
+  root.appendChild(el(
+    "div", "muted",
+    "Characters per minute in the manga reader, by day: the kana and kanji on the pages " +
+    "each sitting showed over its wall-clock minutes. Adult native readers of ordinary " +
+    "prose sit around 500–600.",
+  ));
+  const pts = days.filter((d) => d.cpm !== null);
+  const card = el("div", "speed-card");
+  if (pts.length) {
+    const W = 360, H = 170, L = 34, R = 12, T = 14, B = 26;
+    const max = Math.max(...pts.map((d) => d.cpm!));
+    const top = Math.max(50, Math.ceil(max / 50) * 50);
+    const n = days.length;
+    const xOf = (i: number) => (n > 1 ? L + ((W - L - R) * i) / (n - 1) : (L + W - R) / 2);
+    const yOf = (v: number) => T + (H - T - B) * (1 - v / top);
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "speed-svg", role: "img",
+      "aria-label": "reading speed, characters per minute by day" });
+    // recessive grid + y labels
+    for (const v of [0, top / 2, top]) {
+      svg.appendChild(svgEl("line", { x1: L, x2: W - R, y1: yOf(v), y2: yOf(v), class: "grid" }));
+      const t = svgEl("text", { x: L - 6, y: yOf(v) + 4, class: "ylab", "text-anchor": "end" });
+      t.textContent = String(Math.round(v));
+      svg.appendChild(t);
+    }
+    // x labels: first and last day (+ the middle one when there's room)
+    const xi = n > 4 ? [0, Math.floor((n - 1) / 2), n - 1] : n > 1 ? [0, n - 1] : [0];
+    for (const i of xi) {
+      const t = svgEl("text", { x: xOf(i), y: H - 8, class: "xlab",
+        "text-anchor": i === 0 ? "start" : i === n - 1 ? "end" : "middle" });
+      t.textContent = shortDay(days[i].day!);
+      svg.appendChild(t);
+    }
+    // the line, broken at unmeasured days
+    let d = "";
+    let pen = false;
+    days.forEach((p, i) => {
+      if (p.cpm === null) { pen = false; return; }
+      d += `${pen ? "L" : "M"}${xOf(i).toFixed(1)},${yOf(p.cpm).toFixed(1)}`;
+      pen = true;
+    });
+    svg.appendChild(svgEl("path", { d, class: "speed-line" }));
+    const cross = svgEl("line", { x1: 0, x2: 0, y1: T, y2: H - B, class: "cross" });
+    cross.style.display = "none";
+    svg.appendChild(cross);
+    const dots: SVGCircleElement[] = [];
+    days.forEach((p, i) => {
+      if (p.cpm === null) return;
+      const c = svgEl("circle", { cx: xOf(i), cy: yOf(p.cpm), r: 4, class: "speed-dot" });
+      svg.appendChild(c);
+      dots[i] = c;
+    });
+    const tip = el("div", "speed-tip");
+    tip.hidden = true;
+    const show = (i: number) => {
+      const p = days[i];
+      if (p.cpm === null) return;
+      cross.setAttribute("x1", String(xOf(i)));
+      cross.setAttribute("x2", String(xOf(i)));
+      cross.style.display = "";
+      dots.forEach((c, j) => c.classList.toggle("hot", j === i));
+      tip.textContent =
+        `${p.day} · ${Math.round(p.cpm)} chars/min · ${p.pages ?? 0} pages · ${p.minutes} min`;
+      tip.hidden = false;
+    };
+    const hide = () => {
+      cross.style.display = "none";
+      dots.forEach((c) => c.classList.remove("hot"));
+      tip.hidden = true;
+    };
+    const nearest = (clientX: number) => {
+      const box = svg.getBoundingClientRect();
+      const x = ((clientX - box.left) / (box.width || 1)) * W;
+      let best = -1;
+      let bestD = Infinity;
+      days.forEach((p, i) => {
+        if (p.cpm === null) return;
+        const dd = Math.abs(xOf(i) - x);
+        if (dd < bestD) { bestD = dd; best = i; }
+      });
+      return best;
+    };
+    svg.addEventListener("pointermove", (e) => { const i = nearest(e.clientX); if (i >= 0) show(i); });
+    svg.addEventListener("pointerdown", (e) => { const i = nearest(e.clientX); if (i >= 0) show(i); });
+    svg.addEventListener("pointerleave", hide);
+    card.appendChild(svg);
+    card.appendChild(tip);
+    // the latest day, direct-labelled
+    const last = pts[pts.length - 1];
+    card.appendChild(el("div", "speed-now",
+      `latest: ${Math.round(last.cpm!)} chars/min on ${shortDay(last.day!)}`));
+  } else {
+    card.appendChild(el("div", "muted", "No measured reading yet — a volume's pages get " +
+      "character counts when its coverage pass runs."));
+  }
+  root.appendChild(card);
+
+  // table view of the same points
+  const det = document.createElement("details");
+  det.className = "speed-table";
+  const sum = document.createElement("summary");
+  sum.textContent = "By day";
+  det.appendChild(sum);
+  const wrap = el("div", "media-wrap");
+  const table = document.createElement("table");
+  table.className = "media-table";
+  const hr = table.createTHead().insertRow();
+  for (const h of ["day", "pages", "chars", "min", "ch/min"]) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    hr.appendChild(th);
+  }
+  const body = table.createTBody();
+  for (const p of [...days].reverse()) {
+    const tr = body.insertRow();
+    const th = document.createElement("th");
+    th.textContent = p.day!;
+    tr.appendChild(th);
+    for (const v of [p.pages ?? 0, p.chars, p.minutes, p.cpm === null ? null : Math.round(p.cpm)]) {
+      const td = tr.insertCell();
+      td.textContent = v === null ? "–" : typeof v === "number" && !Number.isInteger(v) ? v.toFixed(1) : nf.format(v);
+    }
+  }
+  wrap.appendChild(table);
+  det.appendChild(wrap);
+  root.appendChild(det);
 }
 
 export function statsView(): HTMLElement {

@@ -45,7 +45,7 @@ import { statsView } from "./views/stats";
 import { confirmView } from "./views/confirm";
 import { wordListView } from "./views/wordlist";
 import { cacheStats } from "./store";
-import type { ConfirmCandidate, Job, Stats } from "./types";
+import type { ConfirmCandidate, Job, MediaStats, MediumStats, Stats } from "./types";
 
 const doc = demo as unknown as PrepDoc;
 const ep = doc.episode.id;
@@ -356,6 +356,89 @@ describe("statsView", () => {
     ],
     evidence_by_source: { exposure: 26140, tap_known: 391 },
   };
+  const medium = (o: Partial<MediumStats>): MediumStats => ({
+    sittings: 0, hours: 0, episodes: 0, words_seen: 0, unique_words: 0, only_here: 0,
+    unique_known: 0, first_met: 0, first_met_known: 0, lookups: 0, unique_looked_up: 0,
+    marked_known: 0, marked_unknown: 0, marked_interest: 0, became_known: 0,
+    became_learning: 0, became_known_30d: 0, ...o,
+  });
+  const off = { marked_known: 0, marked_unknown: 0, marked_interest: 0, became_known: 0,
+    became_learning: 0, became_known_30d: 0 };
+  const media: MediaStats = {
+    media: {
+      watch: medium({ sittings: 1766, hours: 3284.1, episodes: 163, words_seen: 235984,
+        unique_words: 27023, lookups: 1559, marked_known: 960 }),
+      read: medium({ sittings: 19, hours: 1.5, app_hours: 1.5, episodes: 3, words_seen: 2522, unique_words: 733,
+        lookups: 483, marked_known: 34, became_known: 2, pages_read: 151, pages_turned: 187,
+        words_read: 5617, chars_read: 10231, words_per_minute: 53.5, chars_per_minute: 97.4 }),
+      listen: medium({ sittings: 71, hours: 80.8, app_hours: 80.8, words_per_hour: 329, episodes: 12,
+        words_seen: 26554, unique_words: 3853 }),
+    },
+    elsewhere: { list: { ...off, marked_known: 15 }, confirm: { ...off, confirmed: 215, deferred: 114 },
+      import: { ...off, became_known: 15 } },
+    since_days: 30,
+    reading: {
+      days: [
+        { day: "2026-09-14", sittings: 10, pages: 23, words: 1876, chars: 3361, minutes: 19.5, minutes_measured: 19.5, wpm: 96.4, cpm: 172.7 },
+        { day: "2026-09-15", sittings: 1, pages: 11, words: 0, chars: 0, minutes: 8.9, minutes_measured: 0, wpm: null, cpm: null },
+        { day: "2026-09-22", sittings: 5, pages: 80, words: 2232, chars: 4086, minutes: 52.3, minutes_measured: 52.3, wpm: 42.7, cpm: 78.2 },
+      ],
+      volumes: [],
+      total: { sittings: 16, pages_read: 151, pages_turned: 187, words: 4108, chars: 7447, minutes: 80.7, minutes_measured: 71.8, wpm: 57.2, cpm: 103.7 },
+    },
+  };
+
+  it("renders watching / reading / listening side by side", async () => {
+    vi.spyOn(api, "getStats").mockResolvedValue({ ...stats, media });
+    const root = statsView();
+    document.body.appendChild(root);
+    await vi.waitFor(() => expect(root.querySelector(".media-table")).not.toBeNull());
+    const table = root.querySelector(".media-table")!;
+    expect([...table.querySelectorAll("thead th")].map((t) => t.textContent))
+      .toEqual(["", "▶ watching", "📖 reading", "🎧 listening"]);
+    const row = (label: string) =>
+      [...table.querySelectorAll("tbody tr")].find((tr) => tr.querySelector("th")!.textContent === label)!;
+    expect([...row("Words seen").querySelectorAll("td")].map((t) => t.textContent))
+      .toEqual(["235,984", "2,522", "26,554"]);
+    expect([...row("Lookups").querySelectorAll("td")].map((t) => t.textContent))
+      .toEqual(["1,559", "483", "–"]); // nothing looked up on the Listen tab
+    expect([...row("Hours").querySelectorAll("td")].map((t) => t.textContent))
+      .toEqual(["3,284", "1.5", "81"]);
+    // density + reading rows: pages only exist for reading, words/hour only where measured
+    expect([...row("Pages read").querySelectorAll("td")].map((t) => t.textContent))
+      .toEqual(["–", "151", "–"]);
+    expect([...row("…per hour").querySelectorAll("td")].map((t) => t.textContent))
+      .toEqual(["–", "–", "329"]);
+    expect([...row("Characters read").querySelectorAll("td")].map((t) => t.textContent))
+      .toEqual(["–", "10,231", "–"]);
+    expect([...row("…per minute").querySelectorAll("td")].map((t) => t.textContent))
+      .toEqual(["–", "97", "–"]);
+    expect(row("Words on pages read")).toBeUndefined();
+    // the reading-speed graph: one line broken at the unmeasured day, a dot per measured day
+    const svg = root.querySelector<SVGSVGElement>(".speed-svg")!;
+    expect(svg).not.toBeNull();
+    expect(svg.querySelectorAll(".speed-dot").length).toBe(2);
+    expect(svg.querySelector(".speed-line")!.getAttribute("d")!.split("M").length - 1).toBe(2);
+    expect(root.querySelector(".speed-now")!.textContent).toContain("78 chars/min");
+    // the same points as a table, newest first, with the unmeasured day dashed
+    const speedRows = [...root.querySelectorAll(".speed-table tbody tr")];
+    expect(speedRows.length).toBe(3);
+    expect(speedRows[0].querySelector("th")!.textContent).toBe("2026-09-22");
+    expect([...speedRows[1].querySelectorAll("td")].map((t) => t.textContent)).toEqual(["11", "0", "8.9", "–"]);
+    expect([...speedRows[0].querySelectorAll("td")].map((t) => t.textContent)).toEqual(["80", "4,086", "52.3", "78"]);
+    expect(root.textContent).not.toContain("words/min");
+    // an all-zero measure is dropped, not shown as a row of dashes
+    expect(row("Marked unknown ✗")).toBeUndefined();
+    expect(row("Became known")).toBeDefined();
+    // off-medium marks below the table
+    expect(root.textContent).toContain("Confirmed known");
+    expect(root.textContent).toContain("215");
+    // the old "Evidence on record" list is gone (2026-09-22): the table is
+    // the per-medium view, and raw evidence-row counts confused it
+    expect(root.textContent).not.toContain("Evidence on record");
+    root.remove();
+    vi.restoreAllMocks();
+  });
 
   it("renders headline tiles and a coverage bar per band", async () => {
     vi.spyOn(api, "getStats").mockResolvedValue(stats);

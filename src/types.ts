@@ -341,6 +341,80 @@ export interface Stats {
   grammar_learning?: number;
   grammar_confirm_candidates?: number;
   grammar_proposed?: number;
+  media?: MediaStats; // watching / reading / listening side by side — absent on older servers
+}
+
+/** One medium's share of the immersion record (GET /stats → media): the
+    time log, the word sightings credited to it, the popup opens and marks
+    made there, and the status changes its evidence tipped. */
+export interface MediumStats {
+  sittings: number;
+  hours: number;
+  app_hours?: number; // …of which the app's own sittings (the ones that credit words)
+  words_per_hour?: number | null; // density: words seen per app hour
+  episodes: number; // distinct episodes the app recorded a sitting on
+  // reading only (episodes.page_words × the reader's page spans)
+  pages_read?: number; // distinct pages ever shown
+  pages_turned?: number; // a page once per sitting it was shown in
+  words_read?: number; // words on the pages each sitting showed
+  chars_read?: number;
+  words_per_minute?: number | null;
+  chars_per_minute?: number | null;
+  words_seen: number; // token sightings credited to this medium
+  unique_words: number; // distinct words met here
+  only_here: number; // …met here and nowhere else
+  unique_known: number; // …met here and known now
+  first_met: number; // words whose first credited sighting was here
+  first_met_known: number; // …of which known now
+  lookups: number; // popup opens made here
+  unique_looked_up: number;
+  marked_known: number;
+  marked_unknown: number;
+  marked_interest: number;
+  became_known: number; // status changes to known tipped by evidence made here
+  became_learning: number;
+  became_known_30d: number;
+}
+
+/** Marks / status changes made outside any medium: a list review, the
+    confirm queue (with its own yes / not-yet counts), a bulk import. */
+export interface OffMediumStats {
+  marked_known: number;
+  marked_unknown: number;
+  marked_interest: number;
+  became_known: number;
+  became_learning: number;
+  became_known_30d: number;
+  confirmed?: number;
+  deferred?: number;
+}
+
+/** One day (or one volume, or the all-time total) of reading: distinct pages
+    shown, words / chars on them, wall-clock minutes, and the speed over the
+    minutes whose pages had counts (a volume not yet stamped reads with no
+    speed). `wpm` / `cpm` are null when nothing measured. */
+export interface ReadingPoint {
+  day?: string;
+  episode_id?: string;
+  title?: string | null;
+  sittings: number;
+  pages?: number;
+  pages_read?: number;
+  pages_turned?: number;
+  page_count?: number | null;
+  words: number;
+  chars: number;
+  minutes: number;
+  minutes_measured: number;
+  wpm: number | null;
+  cpm: number | null;
+}
+
+export interface MediaStats {
+  media: { watch: MediumStats; read: MediumStats; listen: MediumStats };
+  elsewhere: { list: OffMediumStats; confirm: OffMediumStats; import: OffMediumStats };
+  since_days: number;
+  reading?: { days: ReadingPoint[]; volumes: ReadingPoint[]; total: ReadingPoint }; // absent on older servers
 }
 
 /** One row in the confirm queue: an item whose watched exposures cleared the
@@ -357,7 +431,7 @@ export interface ConfirmCandidate {
   episode_spread: number;
   seen_active?: number; // times seen: occurrences × player plays over watched episodes
   seen_passive?: number; // times heard on the Listen tab (counted apart, never feeds θ)
-  seen_by_mode?: Partial<Record<EncounterMode | "unknown", number>> | null; // times seen split by subtitle state
+  seen_by_mode?: Partial<Record<EncounterMode | "read" | "unknown", number>> | null; // times seen split by subtitle state ("read" = the manga reader)
   lookups?: number; // popup opens with no mark, all episodes
   lookups_listed?: number; // …of which while the word sat on a list
   confirm_score?: number | null; // the adaptive scorer's P(known), once fitted
