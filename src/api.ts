@@ -11,15 +11,16 @@ import type {
   ListWord,
   MangaDoc,
   MangaLibrary,
+  MangaVoiceIndex,
   PageDoc,
   PaintState,
   PrepDoc,
   SeriesRating,
   Stats,
   TapBatch,
+  TapMark,
   TranscriptDoc,
   ViewSegment,
-  TapMark,
 } from "./types";
 import { getSettings } from "./store";
 
@@ -194,6 +195,12 @@ export const api = {
   getManga: (id: string) => request<MangaDoc>(`/manga/${encodeURIComponent(id)}`),
   mangaPageUrl: (id: string, file: string) =>
     withToken(`${base()}/manga/${encodeURIComponent(id)}/page/${encodeURIComponent(file)}`),
+  // the volume's voice track (one ElevenLabs clip per bubble, pre-rendered on
+  // the PC — tools/manga_voice.py): the index (404 = no track yet) and the clips
+  mangaVoiceUrl: (id: string) => `${base()}/manga/${encodeURIComponent(id)}/voice`,
+  getMangaVoice: (id: string) => request<MangaVoiceIndex>(`/manga/${encodeURIComponent(id)}/voice`),
+  mangaVoiceClipUrl: (id: string, file: string) =>
+    withToken(`${base()}/manga/${encodeURIComponent(id)}/voice/${encodeURIComponent(file)}`),
   // the PC's manga library (series → volumes, with queue state) and the
   // picker's "queue these volumes" — the server scans the folder over ssh
   getMangaLibrary: (refresh = false) =>

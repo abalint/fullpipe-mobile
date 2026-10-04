@@ -612,6 +612,12 @@ details.week-more > summary { color: var(--muted); font-size: .85rem; cursor: po
 .gloss-pop .gp-pattern { color: #e8d5ff; font-weight: 600; }
 .gloss-pop .gp-pattern.know { color: #6fd0ff; }
 .gloss-pop .gp-ask { color: #6fd0ff; font-size: .8rem; }
+/* the bubble's voice clip (manga voice track): ▶ + the speaker */
+.gloss-pop .gp-line-voice { display: flex; align-items: center; gap: 8px; }
+.gloss-pop .gp-play { background: #2a2a2a; color: #fff; border: 1px solid #555; border-radius: 50%;
+                      width: 32px; height: 32px; font-size: .9rem; line-height: 1; padding: 0; }
+.gloss-pop .gp-play:active { background: #444; }
+.gloss-pop .gp-speaker { color: #cfcfcf; }
 
 .player-controls { display: flex; flex-direction: column; gap: 4px; }
 .player-controls .row { display: flex; gap: 6px; align-items: center; }
@@ -792,6 +798,8 @@ button.more { display: block; margin: 12px auto 24px; }
 .mg-block.h .w.tap-u { color: rgba(255, 150, 50, .95); }
 .mg-block .w.tap-h::after, .mg-block .w.tap-u::after { content: none; }
 .mg-block .w.tap-committed { opacity: .9; }
+/* a bubble being read aloud (long-press, or ▶ in the popup) */
+.mg-block.speaking { outline: 2px solid rgba(110, 208, 255, .9); outline-offset: 2px; border-radius: 4px; }
 /* T: show what the OCR read (checking a bubble, or an unreadable scan) */
 .manga-view.show-text .mg-block { color: #fff; background: rgba(0,0,0,.72); }
 .manga-view.show-text .mg-block .w { color: #fff; }

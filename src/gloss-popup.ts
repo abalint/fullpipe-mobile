@@ -46,10 +46,18 @@ export interface KeywordInfo {
     lookups, curated grammar/phrases for the line notes. The player passes the
     current cue; the reader passes the tapped sentence. */
 export interface PopupSentence {
+  idx?: number; // the sentence's idx in /transcript (the reader's voice track keys on it)
   tokens?: Token[];
   grammar?: SentenceGrammar[];
   phrases?: SentencePhrase[];
   gloss?: string; // the curate pass's meaning of the whole line, when authored
+}
+
+/** A pre-rendered reading of the tapped line (the manga voice track): who
+    says it, and how to play it. */
+export interface VoiceLine {
+  speaker: string | null;
+  play(): void;
 }
 
 export interface GlossPopupOptions {
@@ -83,6 +91,9 @@ export interface GlossPopupOptions {
   /** Extra class on the card — "fixed" pins it above the bottom nav (the
       reader's scrolling page has no stage to anchor to). */
   extraClass?: string;
+  /** The line's voice clip when the volume has a voice track (manga
+      reader) — rendered as a ▶ row at the foot with the speaker's name. */
+  voiceFor?(sentence?: PopupSentence): VoiceLine | null;
 }
 
 export interface GlossPopup {
@@ -353,8 +364,22 @@ export function createGlossPopup(opts: GlossPopupOptions): GlossPopup {
       row.appendChild(el("span", "gp-gloss", sentence.gloss));
       word.appendChild(row);
     }
+    // hear the bubble (the volume's voice track): ▶ + who says it
+    const voice = opts.voiceFor?.(sentence) ?? null;
+    if (voice) {
+      const row = el("div", "gp-line-note gp-line-voice");
+      const play = el("button", "gp-play", "▶") as HTMLButtonElement;
+      play.title = "hear the bubble";
+      play.addEventListener("click", (e) => {
+        e.stopPropagation();
+        voice.play();
+      });
+      row.appendChild(play);
+      row.appendChild(el("span", "gp-speaker", voice.speaker ?? "hear the bubble"));
+      word.appendChild(row);
+    }
     if (!info && !entries.length && !infl && !covering.length &&
-        !units.length && !unplaced.length && !sentence?.phrases?.length && !sentence?.gloss)
+        !units.length && !unplaced.length && !sentence?.phrases?.length && !sentence?.gloss && !voice)
       word.appendChild(el("div", "gp-none", "no dictionary entry"));
     pop.appendChild(word);
     pop.style.display = "";

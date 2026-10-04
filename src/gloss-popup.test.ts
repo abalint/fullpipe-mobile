@@ -189,3 +189,32 @@ describe("gloss popup grammar layer", () => {
     expect(pop.el.querySelectorAll(".gp-line-grammar").length).toBe(0);
   });
 });
+
+describe("gloss popup voice row", () => {
+  it("shows ▶ + the speaker when the host has a clip for the line, and plays it", () => {
+    let played = 0;
+    const pop = createGlossPopup({
+      episodeId: "ep1",
+      defs: () => defs,
+      voiceFor: (s) => (s?.idx === 7 ? { speaker: "モモ", play: () => void played++ } : null),
+    });
+    pop.show("血", 4, { ...sentence, idx: 7 });
+    const row = pop.el.querySelector<HTMLElement>(".gp-line-voice")!;
+    expect(row.querySelector(".gp-speaker")!.textContent).toBe("モモ");
+    (row.querySelector(".gp-play") as HTMLButtonElement).click();
+    expect(played).toBe(1);
+    // a line without a clip gets no row
+    pop.show("血", 4, { ...sentence, idx: 8 });
+    expect(pop.el.querySelector(".gp-line-voice")).toBeNull();
+  });
+
+  it("a clip with no speaker is still offered", () => {
+    const pop = createGlossPopup({
+      episodeId: "ep1", defs: () => ({}),
+      voiceFor: () => ({ speaker: null, play: () => undefined }),
+    });
+    pop.show("なにか", 0, { tokens: [], idx: 1 });
+    expect(pop.el.querySelector(".gp-speaker")!.textContent).toBe("hear the bubble");
+    expect(pop.el.querySelector(".gp-none")).toBeNull(); // the row counts as content
+  });
+});

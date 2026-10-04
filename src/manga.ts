@@ -13,12 +13,13 @@
 // played" — and the Progress tab counts the time as immersion.
 
 import { Capacitor } from "@capacitor/core";
-import { Directory, Filesystem } from "@capacitor/filesystem";
+import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { api } from "./api";
+import type { ApiError } from "./api";
 import { getSettings, newId, recordViewSegment, setOpenViewSegment } from "./store";
 import { readLocalJson, SIDECAR_FORMAT } from "./video";
 import { dayKey, mergeRanges } from "./viewtime";
-import type { Definitions, MangaDoc, TranscriptDoc, ViewSegment } from "./types";
+import type { Definitions, MangaDoc, MangaVoiceIndex, TranscriptDoc, ViewSegment } from "./types";
 
 export interface MangaRecord {
   docPath: string;
@@ -32,6 +33,14 @@ export interface MangaRecord {
   format?: number;
   title?: string;
   at: string;
+  /** The voice track (tools/manga_voice.py — one clip per bubble), once
+      pulled: where the index sits, which render it is (built_at — a
+      re-render on the PC is picked up on the next open) and how many of
+      its clips are on disk. Absent = the volume has no track yet. */
+  voicePath?: string;
+  voiceDir?: string;
+  voiceBuiltAt?: string;
+  voiceClips?: number;
 }
 
 const key = (ep: string) => `fp.manga.${ep}`;
@@ -290,6 +299,96 @@ export function loadLocalMangaTranscript(ep: string): Promise<TranscriptDoc | nu
 
 export function loadLocalMangaDefinitions(ep: string): Promise<Definitions | null> {
   return readLocalJson<Definitions>(getMangaRecord(ep)?.defsPath);
+}
+
+export function loadLocalMangaVoice(ep: string): Promise<MangaVoiceIndex | null> {
+  return readLocalJson<MangaVoiceIndex>(getMangaRecord(ep)?.voicePath);
+}
+
+/** Pull the volume's voice track — the index (404 = the PC hasn't rendered
+    one; null) and every clip not on disk yet, three at a time. Idempotent:
+    the same render already complete on the phone costs one small GET;
+    a newer render (built_at moved) re-pulls the clips that changed
+    (their names are stable, so only files missing from disk are fetched —
+    a re-rendered bubble keeps its name, which is why a new built_at
+    clears the directory first). Returns the index on the phone. */
+export async function downloadMangaVoice(
+  ep: string,
+  onProgress?: (done: number, total: number) => void,
+): Promise<MangaVoiceIndex | null> {
+  const rec = getMangaRecord(ep);
+  if (!rec) return null;
+  let idx: MangaVoiceIndex;
+  try {
+    idx = await api.getMangaVoice(ep);
+  } catch (e) {
+    if ((e as ApiError).status === 404) return null;
+    throw e;
+  }
+  const voiceDir = rec.voiceDir ?? `manga/${ep}/voice`;
+  const voicePath = `${voiceDir}/index.json`;
+  const fresh = rec.voiceBuiltAt !== idx.built_at;
+  if (!fresh && rec.voiceClips === idx.clips.length && rec.voicePath) {
+    return (await readLocalJson<MangaVoiceIndex>(rec.voicePath)) ?? idx;
+  }
+  if (fresh && rec.voiceBuiltAt) {
+    try {
+      await Filesystem.rmdir({ path: voiceDir, directory: Directory.Data, recursive: true });
+    } catch {
+      /* nothing there */
+    }
+  }
+  await ensureDir(voiceDir);
+  await Filesystem.writeFile({
+    path: voicePath,
+    directory: Directory.Data,
+    data: JSON.stringify(idx),
+    encoding: Encoding.UTF8,
+    recursive: true,
+  });
+  const missing: string[] = [];
+  let done = 0;
+  for (const c of idx.clips) {
+    if (await exists(`${voiceDir}/${c.file}`)) done++;
+    else missing.push(c.file);
+  }
+  const save = () => {
+    const cur = getMangaRecord(ep) ?? rec;
+    localStorage.setItem(key(ep), JSON.stringify({
+      ...cur, voicePath, voiceDir, voiceBuiltAt: idx.built_at, voiceClips: done,
+    } satisfies MangaRecord));
+  };
+  onProgress?.(done, idx.clips.length);
+  save();
+  let next = 0;
+  let failed: Error | null = null;
+  const worker = async () => {
+    while (next < missing.length && !failed) {
+      const f = missing[next++];
+      try {
+        await download(api.mangaVoiceClipUrl(ep, f), `${voiceDir}/${f}`);
+        done++;
+        onProgress?.(done, idx.clips.length);
+        if (done % 25 === 0) save();
+      } catch (e) {
+        failed = e as Error;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: PARALLEL }, worker));
+  save();
+  if (failed) throw new Error(`voice download failed after ${done}/${idx.clips.length}: ${(failed as Error).message}`);
+  return idx;
+}
+
+/** A bubble clip's playable URL (the app-internal file, like the pages). */
+export async function voiceClipSrc(ep: string, file: string): Promise<string> {
+  const rec = getMangaRecord(ep);
+  const { uri } = await Filesystem.getUri({
+    path: `${rec?.voiceDir ?? `manga/${ep}/voice`}/${file}`,
+    directory: Directory.Data,
+  });
+  return Capacitor.convertFileSrc(uri);
 }
 
 /** A page scan's displayable URL: the app-internal file through the

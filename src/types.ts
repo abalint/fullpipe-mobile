@@ -220,6 +220,9 @@ export interface MangaBlock {
   font_size: number;
   lines: number[];
   sents: number[];
+  /** mokuro's raw block index on the page — the voice track's clips key on
+      (page, k); absent on old sidecars. */
+  k?: number;
   /** One box per printed line (mokuro's line polygons), same order as
       `lines` — present when they pair one-to-one with the read; the
       reader then lays each line on its own glyphs (manga-layout lineStyle). */
@@ -232,6 +235,29 @@ export interface MangaPage {
   w: number;
   h: number;
   blocks: MangaBlock[];
+}
+
+/** One pre-rendered bubble clip of a volume's voice track (tools/manga_voice.py
+    index.json): the file under /manga/{id}/voice/{file}, the bubble's
+    sentences (idxs into /transcript — the reader maps a tapped sentence
+    back to its clip), who says it and how long it runs. */
+export interface MangaVoiceClip {
+  file: string;
+  page: number;
+  k: number;
+  sents: number[];
+  speaker: string | null;
+  voice?: string | null;
+  ms?: number | null;
+  bytes?: number | null;
+}
+
+export interface MangaVoiceIndex {
+  episode_id: string;
+  built_at: string;
+  model?: string;
+  clips: MangaVoiceClip[];
+  bytes?: number;
 }
 
 /** GET /manga/{id} — the reader structure of one volume (tools.manga). */

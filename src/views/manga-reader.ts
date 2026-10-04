@@ -61,12 +61,14 @@ import type { LineGlyphs } from "../manga-ink";
 import {
   continuousScroll,
   downloadManga,
+  downloadMangaVoice,
   getMangaPage,
   getMangaRecord,
   isComplete,
   loadLocalManga,
   loadLocalMangaDefinitions,
   loadLocalMangaTranscript,
+  loadLocalMangaVoice,
   pageImageSrc,
   readingMode,
   ReadRecorder,
@@ -74,6 +76,7 @@ import {
   saveMangaPage,
   setContinuousScroll,
   setReadingMode,
+  voiceClipSrc,
 } from "../manga";
 import type { ReadingMode } from "../manga";
 import {
@@ -98,7 +101,9 @@ import {
   submitTaps,
 } from "../store";
 import { flushOutbox } from "../sync";
-import type { Definitions, MangaDoc, MangaPage, TranscriptDoc, TranscriptSentence } from "../types";
+import type {
+  Definitions, MangaDoc, MangaPage, MangaVoiceClip, MangaVoiceIndex, TranscriptDoc, TranscriptSentence,
+} from "../types";
 
 const HL_KEY = "fp.manga.hl"; // highlight tier for pages: off / focus / learn
 const TIER_LABEL: Record<SubTier, string> = { off: "◨ off", focus: "◨ focus", learn: "◨ learn" };
@@ -120,6 +125,7 @@ export function setMangaTier(tier: SubTier): void {
 }
 const TEXT_KEY = "fp.manga.text"; // "on" = OCR text shown (checking the read)
 const TAP_MS = 300; // max press for a tap; double-tap window
+const LONG_MS = TAP_MS * 2; // a still press this long on a bubble reads it aloud
 const TAP_SLOP = 10; // px of movement that still counts as a tap
 const SWIPE_PX = 60; // travel along the reading axis that turns a page at 1×
 const SNAP_MS = 180; // a 1× page springing back after an uncommitted swipe
@@ -203,6 +209,44 @@ export function mangaReaderView(episodeId: string): HTMLElement {
   let highValue = new Set<string>();
   let snapshot: ListSnapshot & Pick<TranscriptDoc, "grammar_points"> = {};
   let defs: Definitions = {};
+  // the voice track (one clip per bubble, pulled with / after the volume):
+  // sentence idx → clip, so a tapped word or a long-pressed bubble finds its line
+  let voiceBySent = new Map<number, MangaVoiceClip>();
+  let speaking: HTMLAudioElement | null = null;
+  const applyVoice = (idx: MangaVoiceIndex | null) => {
+    voiceBySent = new Map();
+    for (const c of idx?.clips ?? []) for (const si of c.sents) voiceBySent.set(si, c);
+  };
+  /** Play one bubble's clip (the previous one stops); the bubble is outlined
+      while it speaks. The clip is a local file through the webview's file
+      bridge — nothing leaves the phone at read time. */
+  const speak = async (clip: MangaVoiceClip, blk?: HTMLElement | null) => {
+    speaking?.pause();
+    speaking = null;
+    root.querySelectorAll(".mg-block.speaking").forEach((n) => n.classList.remove("speaking"));
+    let src: string;
+    try {
+      src = await voiceClipSrc(episodeId, clip.file);
+    } catch {
+      return;
+    }
+    const a = new Audio(src);
+    speaking = a;
+    const target = blk ?? root.querySelector<HTMLElement>(`.mg-block[data-k="${clip.k}"][data-page="${clip.page}"]`);
+    target?.classList.add("speaking");
+    const done = () => {
+      target?.classList.remove("speaking");
+      if (speaking === a) speaking = null;
+    };
+    a.addEventListener("ended", done);
+    a.addEventListener("error", done);
+    a.play().catch(done);
+  };
+  const voiceFor = (sentence?: { idx?: number }) => {
+    const si = sentence?.idx;
+    const clip = si != null ? voiceBySent.get(si) : undefined;
+    return clip ? { speaker: clip.speaker, play: () => void speak(clip) } : null;
+  };
   let mode: ReadingMode = "rtl";
   let continuous = false;
   let page = 0;
@@ -229,6 +273,7 @@ export function mangaReaderView(episodeId: string): HTMLElement {
   const popup = createGlossPopup({
     episodeId,
     defs: () => defs,
+    voiceFor,
     interest: () => lists.interest,
     // the grammar layer's gloss + tier come from the transcript; the
     // grammar / phrase axes (known · think-you-know · ★) from the live paint
@@ -372,6 +417,9 @@ export function mangaReaderView(episodeId: string): HTMLElement {
       const lines = blockLines(b, sentences);
       const boxes = b.line_boxes && b.line_boxes.length === lines.length ? b.line_boxes : null;
       const blk = el("div", `mg-block${st.vertical ? " v" : " h"}${boxes ? " lined" : ""}`);
+      blk.dataset.page = String(p.n);
+      blk.dataset.k = String(b.k ?? bi);
+      blk.dataset.sents = b.sents.join(",");
       blk.style.left = `${st.left}px`;
       blk.style.top = `${st.top}px`;
       blk.style.width = `${st.width}px`;
@@ -837,6 +885,14 @@ export function mangaReaderView(episodeId: string): HTMLElement {
       onTap(g.target, p);
       return;
     }
+    if (!g.moved && dt >= LONG_MS) {
+      // a long press on a bubble reads it aloud (when the volume has a voice track)
+      const blk = g.target?.closest<HTMLElement>(".mg-block") ?? null;
+      const si = Number((blk?.dataset.sents ?? "").split(",")[0]);
+      const clip = Number.isFinite(si) ? voiceBySent.get(si) : undefined;
+      if (clip) void speak(clip, blk);
+      return;
+    }
     if (continuous || view.s > 1.01) {
       // a pan keeps its momentum — but only from a finger still moving as it lifted
       if (g.pinch0 || performance.now() - g.trail[g.trail.length - 1].t > 100) return;
@@ -903,6 +959,8 @@ export function mangaReaderView(episodeId: string): HTMLElement {
   const cleanup = () => {
     recorder?.close();
     recorder = null;
+    speaking?.pause();
+    speaking = null;
     void flushOutbox();
     window.removeEventListener("resize", onResize);
     document.removeEventListener("visibilitychange", onVisibility);
@@ -948,6 +1006,16 @@ export function mangaReaderView(episodeId: string): HTMLElement {
       syncDone();
       if (pendingTapCount(episodeId)) scheduleTapSync(episodeId);
       void livePaint();
+      applyVoice(await loadLocalMangaVoice(episodeId));
+      void downloadMangaVoice(episodeId, (done, total) => {
+        if (root.isConnected && done < total) status.textContent = `voice ${done}/${total}`;
+      }).then((idx) => {
+        if (!root.isConnected) return;
+        if (status.textContent.startsWith("voice ")) status.textContent = "";
+        if (idx) applyVoice(idx);
+      }).catch(() => {
+        if (root.isConnected && status.textContent.startsWith("voice ")) status.textContent = "";
+      });
       if (!rec?.curated) {
         void refreshMangaSidecars(episodeId).then(async (fresh) => {
           if (!fresh || !root.isConnected) return;
