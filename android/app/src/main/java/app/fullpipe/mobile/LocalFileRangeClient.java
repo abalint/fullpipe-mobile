@@ -27,6 +27,12 @@ import java.util.Map;
  * so a pre-positioned stream gets offset twice. It also bounds-checks the
  * range against available() — an int — so available() reports 0, which
  * Chromium reads as "size unknown" and skips the check.
+ *
+ * And Chromium's native InputStream::Skip stores the Java skip() result in
+ * an int, so one skip of 2 GiB or more comes back negative and the request
+ * fails — a range starting past byte 2^31 (≈2:55 into a 3-hour game, where
+ * the media pipeline opens a fresh request) never loads. Its caller loops on
+ * short skips, so skip() moves at most SKIP_CHUNK per call.
  */
 public class LocalFileRangeClient extends BridgeWebViewClient {
 
@@ -117,6 +123,8 @@ public class LocalFileRangeClient extends BridgeWebViewClient {
     /** Whole-file stream with a 64-bit seek for the WebView's skip(), ending
         at `limit` (exclusive) so a bounded range doesn't stream to EOF. */
     private static final class FileRangeStream extends InputStream {
+        /** Below 2^31: Chromium truncates skip()'s return value to an int. */
+        private static final long SKIP_CHUNK = 1L << 30;
         private final FileInputStream in;
         private final long limit;
         private long pos = 0;
@@ -129,7 +137,7 @@ public class LocalFileRangeClient extends BridgeWebViewClient {
         @Override
         public long skip(long n) throws IOException {
             if (n <= 0) return 0;
-            long to = Math.min(limit, pos + n);
+            long to = Math.min(limit, pos + Math.min(n, SKIP_CHUNK));
             in.getChannel().position(to);
             long skipped = to - pos;
             pos = to;
