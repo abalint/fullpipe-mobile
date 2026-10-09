@@ -23,6 +23,7 @@ import type {
   ViewSegment,
 } from "./types";
 import { getSettings } from "./store";
+import type { AmbienceCatalog } from "./ambience";
 
 export class ApiError extends Error {
   constructor(
@@ -208,6 +209,11 @@ export const api = {
   ingestManga: (remoteDir: string, volumes: number[]) =>
     request<{ slug: string; title: string; enqueued: string[]; already: string[] }>(
       "/manga/ingest", { method: "POST", body: JSON.stringify({ remote_dir: remoteDir, volumes }) }),
+  // background sound for reading (tools/ambience.py): the catalog of loops
+  // + mood playlists, and its files by their catalog-relative path
+  getAmbience: () => request<AmbienceCatalog>("/ambience"),
+  ambienceFileUrl: (file: string) =>
+    withToken(`${base()}/ambience/${file.split("/").map(encodeURIComponent).join("/")}`),
   // JMdict entries for every content lemma in the episode (any-word popup);
   // {} until the PC has run `tools.jmdict build`
   getDefinitions: (id: string) =>

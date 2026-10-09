@@ -38,6 +38,12 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <!-- background sound for reading: looping ambience + mood music -->
+        <service
+            android:name=".AmbienceService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <!-- episode downloads: keep pulling with the app backgrounded -->
         <service
             android:name=".VideoDownloadService"

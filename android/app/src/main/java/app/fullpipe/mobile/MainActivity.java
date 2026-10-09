@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ShareTargetPlugin.class);
         registerPlugin(PassiveAudioPlugin.class);
         registerPlugin(VideoDownloadPlugin.class);
+        registerPlugin(AmbiencePlugin.class);
         super.onCreate(savedInstanceState);
         // >2 GiB local videos: Capacitor's range handler is 32-bit
         bridge.setWebViewClient(new LocalFileRangeClient(bridge));

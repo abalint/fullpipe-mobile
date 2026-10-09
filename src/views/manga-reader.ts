@@ -101,6 +101,8 @@ import {
   submitTaps,
 } from "../store";
 import { flushOutbox } from "../sync";
+import { Ambience } from "../ambience";
+import { ambienceButton, ambienceState } from "./ambience-panel";
 import type {
   Definitions, MangaDoc, MangaPage, MangaVoiceClip, MangaVoiceIndex, TranscriptDoc, TranscriptSentence,
 } from "../types";
@@ -166,7 +168,8 @@ export function mangaReaderView(episodeId: string): HTMLElement {
   const syncEl = el("span", "mg-sync");
   const doneBtn = el("button", "mg-btn mg-done", "✓") as HTMLButtonElement;
   doneBtn.title = "finished reading";
-  top.append(back, titleEl, syncEl, hlBtn, textBtn, modeBtn, scrollBtn, doneBtn);
+  const ambBtn = ambienceButton("mg-btn"); // background sound under the reading
+  top.append(back, titleEl, syncEl, ambBtn, hlBtn, textBtn, modeBtn, scrollBtn, doneBtn);
   const bottom = el("div", "mg-bar mg-bottom");
   const slider = document.createElement("input");
   slider.type = "range";
@@ -234,9 +237,15 @@ export function mangaReaderView(episodeId: string): HTMLElement {
     speaking = a;
     const target = blk ?? root.querySelector<HTMLElement>(`.mg-block[data-k="${clip.k}"][data-page="${clip.page}"]`);
     target?.classList.add("speaking");
+    // music under the voice drops to a murmur while it speaks (the native
+    // ambience service ducks only the music channel, not the rain)
+    if (ambienceState().music) void Ambience.setDuck({ on: true }).catch(() => {});
     const done = () => {
       target?.classList.remove("speaking");
-      if (speaking === a) speaking = null;
+      if (speaking === a) {
+        speaking = null;
+        void Ambience.setDuck({ on: false }).catch(() => {});
+      }
     };
     a.addEventListener("ended", done);
     a.addEventListener("error", done);
@@ -961,6 +970,7 @@ export function mangaReaderView(episodeId: string): HTMLElement {
     recorder = null;
     speaking?.pause();
     speaking = null;
+    void Ambience.setDuck({ on: false }).catch(() => {});
     void flushOutbox();
     window.removeEventListener("resize", onResize);
     document.removeEventListener("visibilitychange", onVisibility);

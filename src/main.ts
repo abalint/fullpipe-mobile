@@ -19,6 +19,7 @@ import { isPageSource } from "./pages";
 import { getCachedJobs, getSettings, hydratePrepCache } from "./store";
 import { nowPlayingStrip } from "./nowplaying";
 import { installDownloads } from "./downloads";
+import { ambienceStrip } from "./views/ambience-panel";
 
 const outlet = document.getElementById("outlet")!;
 
@@ -29,6 +30,8 @@ document.querySelector("nav")!.before(
     (ep) => getCachedJobs()?.jobs.find((j) => j.episode_id === ep)?.title,
   ),
 );
+// …and the ambience strip (background sound for reading) under it
+document.querySelector("nav")!.before(ambienceStrip());
 
 function route(): void {
   const hash = location.hash || "#/queue";

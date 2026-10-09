@@ -15,6 +15,7 @@ import {
 } from "../store";
 import { flushOutbox } from "../sync";
 import { deleteVideo, downloadedEpisodes, fmtSize } from "../video";
+import { deleteAllLocal, localBytes, stopAll } from "../ambience";
 import type { PrepDoc } from "../types";
 import demoPrep from "../demo-prep.json";
 
@@ -162,6 +163,25 @@ export function settingsView(): HTMLElement {
   };
   renderVideos();
   root.appendChild(videoList);
+
+  // ambience files (sounds + mood tracks pulled on demand from the ♫ sheet)
+  root.appendChild(el("h2", "", "Ambience sounds"));
+  const ambRow = el("div", "job");
+  const ambSize = el("span", "muted");
+  const ambDel = el("button", "small", "delete all") as HTMLButtonElement;
+  const renderAmb = () => {
+    const b = localBytes();
+    ambSize.textContent = b ? `${fmtSize(b)} on device` : "none on device";
+    ambDel.disabled = !b;
+  };
+  ambDel.addEventListener("click", async () => {
+    await stopAll().catch(() => {});
+    await deleteAllLocal();
+    renderAmb();
+  });
+  ambRow.append(el("span", "job-title", "sounds + music"), ambSize, ambDel);
+  renderAmb();
+  root.appendChild(ambRow);
 
   root.appendChild(el("h2", "", "Developer"));
   const demo = el("button", "", "Load demo prep doc") as HTMLButtonElement;

@@ -10,6 +10,7 @@
 // items stay readable.
 
 import { api, ApiError } from "../api";
+import { ambienceButton } from "./ambience-panel";
 import { cancelTapSync } from "../livesync";
 import {
   deleteMangaFiles,
@@ -384,7 +385,7 @@ export function pagesView(): HTMLElement {
   const refresh = el("button", "small refresh", "↻ refresh") as HTMLButtonElement;
   refresh.addEventListener("click", () => void load());
   const libBtn = el("button", "small", "📚 PC library") as HTMLButtonElement;
-  toolbar.append(refresh, libBtn);
+  toolbar.append(refresh, libBtn, ambienceButton("small"));
   const status = el("div", "status");
   const libSlot = el("div");
   const list = el("div", "joblist");

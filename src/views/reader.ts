@@ -41,6 +41,7 @@ import {
   submitTaps,
 } from "../store";
 import { flushOutbox } from "../sync";
+import { ambienceButton } from "./ambience-panel";
 import { cancelTapSync, onTapSync, scheduleTapSync } from "../livesync";
 import type { Definitions, PageDoc, PagePost, TranscriptDoc, TranscriptSentence } from "../types";
 
@@ -92,7 +93,7 @@ export function readerView(episodeId: string): HTMLElement {
   const doneBtn = el("button", "small", "✓ finished") as HTMLButtonElement;
   const backLink = el("a", "small btn", "‹ pages") as HTMLAnchorElement;
   backLink.href = "#/pages";
-  toolbar.append(backLink, rubyBtn, hlBtn, syncEl, doneBtn);
+  toolbar.append(backLink, rubyBtn, hlBtn, ambienceButton("small"), syncEl, doneBtn);
 
   const posts = el("div", "posts");
   const moreBtn = el("button", "small more", "… more posts") as HTMLButtonElement;

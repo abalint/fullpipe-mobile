@@ -14,6 +14,7 @@ import { fmtClock } from "./player";
 import { fmtDur, isPassive, removeJob, swipeable } from "./queue";
 import { filterJobs, listControls, sortJobs } from "../listfilter";
 import type { Job } from "../types";
+import { ambienceButton } from "./ambience-panel";
 
 const SPEED_KEY = "fp.listen.speed";
 const SPEEDS = [0.8, 1, 1.2, 1.5];
@@ -287,7 +288,7 @@ export function passiveView(): HTMLElement {
   );
   const refresh = el("button", "small refresh", "↻ refresh") as HTMLButtonElement;
   refresh.addEventListener("click", () => void load());
-  toolbar.append(playAll, refresh, listCtl.sort);
+  toolbar.append(playAll, refresh, ambienceButton("small"), listCtl.sort);
 
   root.append(toolbar, listCtl.filters, bar, status, list);
 

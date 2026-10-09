@@ -299,3 +299,19 @@ pages/*.jpg}`, resumable — and 📖 opens `views/manga-reader.ts`:
   exposure credit and the weekly goal, shown apart from ▶ watching and 🎧
   listening; `✓` marks the volume finished (no cards);
 - swipe-delete on a volume row is phone-local (the PC keeps everything).
+
+## Ambience (2026-10-08 — fullPipe/skills/ambience)
+
+Background sound under the reading: `src/ambience.ts` (catalog cache,
+on-demand downloads into `ambience/<file>`, the remembered mix in
+`fp.ambience.mix`), `src/views/ambience-panel.ts` (the ♫ sheet, the ♫
+buttons on the manga reader / 5ch reader / Read / Listen, and the strip
+above the nav), and the native `AmbienceService` + `AmbiencePlugin`
+(`src/ambience-web.ts` is the browser fallback for `vite dev`). The service
+runs any number of gapless loop layers (two chained `MediaPlayer`s per
+layer on a seam-crossfaded Opus file) and one shuffled music channel,
+each with its own square-law volume; it is a foreground service that
+takes **no audio focus**, so it sits under the voice clips, PassiveAudio
+and the video player (and does not pause for a call). Headphone unplug
+pauses it. Music ducks to 25 % while a bubble clip speaks
+(`setDuck`). Storage: Settings → "Ambience sounds" (delete all).
